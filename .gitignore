@@ -1,0 +1,30 @@
+# Root
+.env
+*.log
+
+# Backend
+backend/.env
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/bin/
+backend/tmp/
+*.exe
+*.test
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.vite/
+frontend/coverage/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Kilo
+.kilo/
