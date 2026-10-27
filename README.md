@@ -84,6 +84,9 @@ qcdsp/
 │   ├── package.json
 │   ├── tailwind.config.js
 │   └── vite.config.ts
+├── database/
+│   ├── qcdsp_dump.sql              # dump schema + data
+│   └── qcdsp_schema.sql            # dump schema saja
 └── README.md
 ```
 
@@ -160,6 +163,86 @@ Jika memakai registry yang lambat, gunakan mirror:
 npm install --registry=https://registry.npmmirror.com
 ```
 
+### 4.4 Setup di PC Lain (hasil clone)
+
+Beberapa hal **tidak ikut** ke repository dan harus disiapkan manual di PC tujuan:
+
+| Tidak ikut git | Alasan | Yang harus dilakukan |
+|----------------|--------|----------------------|
+| `backend/.env`, `frontend/.env` | masuk `.gitignore` | salin dari `.env.example` lalu sesuaikan |
+| `frontend/node_modules` | di-ignore | `npm ci` |
+| `backend/uploads/*` | di-ignore | copy dari PC lama, atau regenerate lewat seeder |
+| Data PostgreSQL | ada di server DB | jalankan seeder atau restore dump |
+
+**1. Prasyarat** — Git, Node.js 20/22 LTS + npm 10, Go 1.25+, PostgreSQL 14+ (disarankan 18).
+
+**2. Clone dan environment**
+
+```powershell
+git clone <repo-url> qcdsp
+cd qcdsp
+
+Copy-Item backend\.env.example backend\.env
+Copy-Item frontend\.env.example frontend\.env
+```
+
+Sesuaikan `backend/.env` (`DATABASE_URL`, `JWT_SECRET`). **Jangan pakai ulang `JWT_SECRET` PC lama** — generate baru:
+
+```powershell
+$b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+```
+
+**3. Database — pilih salah satu**
+
+*Opsi A — database baru + data dummy (paling praktis, file upload ikut dibuat):*
+
+```powershell
+$env:PGPASSWORD='<password>'
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE qcdsp;"
+
+cd backend
+go mod download
+go run ./cmd/seed      # schema + admin/kategori/dokumen/PR + PDF contoh
+go run ./cmd/server
+```
+
+*Opsi B — restore data dari `database/qcdsp_dump.sql`:*
+
+```powershell
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE qcdsp;"
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h localhost -d qcdsp -f database\qcdsp_dump.sql
+cd backend
+go run ./cmd/server
+```
+
+> Restore memakai `psql` 18 (dump dibuat `pg_dump 18.6` dan memuat direktif `\restrict`).
+
+**4. Frontend**
+
+```powershell
+cd frontend
+npm ci
+npm run dev            # http://localhost:5173
+```
+
+**5. Penting untuk Opsi B — file upload tidak ada di dump**
+
+Dump hanya berisi data; file PDF/lampiran berada di `backend/uploads`. Jika folder itu tidak dicopy, dokumen tetap tampil di daftar tetapi preview/download PDF akan 404. Perlu diketahui juga: seeder **melewati** seeding jika tabel sudah terisi, jadi `go run ./cmd/seed` tidak akan membuat ulang file untuk data hasil restore. Pilihannya:
+
+- copy folder `backend/uploads` dari PC lama ke PC baru, **atau**
+- pakai Opsi A (database kosong + seeder) bila data lama tidak diperlukan.
+
+**6. Verifikasi**
+
+| Cek | Ekspektasi |
+|-----|-----------|
+| `GET http://localhost:8080/health` | `200 OK` |
+| `http://localhost:5173` | halaman gateway tampil |
+| Login admin | sesuai password yang berlaku (lihat catatan di bawah) |
+| Buka salah satu dokumen PDF | preview tampil (bukan 404) |
+
+> Password admin mengikuti sumber datanya: `Admin123!` untuk database hasil seeder, sedangkan untuk restore dump gunakan password yang terakhir diubah di PC asal — dump memuat hash password terkini.
+
 ---
 
 ## 5. Konfigurasi Environment
@@ -216,6 +299,36 @@ CREATE SCHEMA public;
 ```
 
 Lalu jalankan ulang backend + seeder.
+
+### SQL Dump (migrasi database)
+
+Folder `database/` berisi dump siap pakai:
+
+| File | Isi |
+|------|-----|
+| `database/qcdsp_dump.sql` | Schema + **seluruh data** (admin, kategori, dokumen, PR, lampiran, riwayat status) |
+| `database/qcdsp_schema.sql` | Schema saja (tabel, index, trigger, constraint) |
+
+Restore ke server/database baru (dibuat dengan `pg_dump 18.6`, format plain SQL, `--no-owner --no-privileges`):
+
+```powershell
+$env:PGPASSWORD='<password>'
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h <host> -c "CREATE DATABASE qcdsp;"
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h <host> -d qcdsp -f database\qcdsp_dump.sql
+```
+
+Buat dump ulang (stop backend dulu supaya data konsisten):
+
+```powershell
+& "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -U postgres -h localhost -d qcdsp --no-owner --no-privileges --encoding=UTF8 -f database\qcdsp_dump.sql
+& "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -U postgres -h localhost -d qcdsp --no-owner --no-privileges --encoding=UTF8 --schema-only -f database\qcdsp_schema.sql
+```
+
+> **Isi dump:** seluruh tabel dan baris data (`schema_migrations` ikut, jadi migrasi tidak dijalankan ulang). File upload di `backend/uploads` **tidak** termasuk — lihat [4.4 Setup di PC Lain](#44-setup-di-pc-lain-hasil-clone).
+>
+> **Keamanan:** dump memuat hash password admin yang berlaku saat dump dibuat — simpan di tempat terbatas. Setelah restore ke environment baru, ganti `JWT_SECRET` di `backend/.env` dan pertimbangkan mengganti password admin.
+>
+> **Versi:** dibuat dengan `pg_dump 18.6`; restore menggunakan `psql` 18 karena dump memuat direktif `\restrict`. Untuk server PostgreSQL versi lebih lama, buat dump baru dari server tersebut.
 
 ---
 
@@ -427,3 +540,7 @@ Catatan produksi:
 | Upload 413 | Naikkan `client_max_body_size` di reverse proxy |
 | Login gagal | Jalankan seeder; cek username/password |
 | `npm install` lambat/ECONNRESET | Gunakan `--registry=https://registry.npmmirror.com` |
+| `Failed to resolve entry for package ...` / modul tidak ditemukan | `node_modules` ter-ekstrak tidak lengkap (install terputus). Stop dev server, hapus `node_modules` + `node_modules/.vite`, lalu `npm ci` |
+| Preview/download PDF 404 | File tidak ada di `backend/uploads` (tidak ikut git). Copy folder uploads dari PC asal, atau pakai database baru + seeder |
+| `\restrict: invalid command` saat restore dump | Restore memakai `psql` 18 (dump dibuat `pg_dump 18.6`) |
+| `go: go.mod requires go >= 1.25.0` | Upgrade Go ke 1.25+ |
