@@ -171,10 +171,10 @@ Beberapa hal **tidak ikut** ke repository dan harus disiapkan manual di PC tujua
 |----------------|--------|----------------------|
 | `backend/.env`, `frontend/.env` | masuk `.gitignore` | salin dari `.env.example` lalu sesuaikan |
 | `frontend/node_modules` | di-ignore | `npm ci` |
-| `backend/uploads/*` | di-ignore | copy dari PC lama, atau regenerate lewat seeder |
+| `backend/uploads/*` | di-ignore | copy dari PC lama, atau seed di database kosong |
 | Data PostgreSQL | ada di server DB | jalankan seeder atau restore dump |
 
-**1. Prasyarat** — Git, Node.js 20/22 LTS + npm 10, Go 1.25+, PostgreSQL 14+ (disarankan 18).
+**1. Prasyarat** — Git, Node.js 20/22 LTS + npm 10, Go 1.25+, PostgreSQL 18 (dump dibuat dengan `pg_dump 18.6`; server versi lebih lama perlu dump ulang).
 
 **2. Clone dan environment**
 
