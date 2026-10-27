@@ -19,15 +19,25 @@ export interface PaginationMeta {
   pagination: Pagination
 }
 
+export type AdminRole = 'super_admin' | 'admin' | 'pr_viewer'
+
 export interface AdminUser {
   id: string
   username: string
   name: string
-  role: 'admin' | 'super_admin'
+  role: AdminRole
   is_active: boolean
   last_login_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface AdminAccountInput {
+  username: string
+  name: string
+  password?: string
+  role: AdminRole
+  is_active?: boolean
 }
 
 export interface LoginResult {

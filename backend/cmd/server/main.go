@@ -57,19 +57,21 @@ func main() {
 	prRepo := repository.NewPurchaseRequestRepository(db)
 
 	authService := service.NewAuthService(adminRepo, tokens)
+	adminService := service.NewAdminService(adminRepo)
 	categoryService := service.NewCategoryService(categoryRepo)
 	knowledgeService := service.NewKnowledgeService(knowledgeRepo, categoryRepo, cfg.UploadDir)
 	prService := service.NewPurchaseRequestService(prRepo, knowledgeRepo, cfg.UploadDir)
 
 	handlers := router.Handlers{
 		Auth:            handler.NewAuthHandler(authService),
+		Admin:           handler.NewAdminHandler(adminService),
 		Category:        handler.NewCategoryHandler(categoryService),
 		Knowledge:       handler.NewKnowledgeHandler(knowledgeService, cfg.UploadDir, cfg.MaxUploadBytes()),
 		PurchaseRequest: handler.NewPurchaseRequestHandler(prService, cfg.UploadDir, cfg.MaxUploadBytes()),
 		File:            handler.NewFileHandler(knowledgeService, cfg.UploadDir, cfg.MaxUploadBytes()),
 	}
 
-	engine := router.New(handlers, tokens, cfg.CORSAllowedHosts, cfg.MaxUploadBytes())
+	engine := router.New(handlers, tokens, adminRepo, cfg.CORSAllowedHosts, cfg.MaxUploadBytes())
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

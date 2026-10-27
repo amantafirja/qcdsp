@@ -63,6 +63,10 @@ func main() {
 		log.Fatalf("seed admin gagal: %v", err)
 	}
 
+	if err := seedViewer(ctx, db); err != nil {
+		log.Fatalf("seed viewer gagal: %v", err)
+	}
+
 	categoryIDs, err := seedCategories(ctx, db)
 	if err != nil {
 		log.Fatalf("seed kategori gagal: %v", err)
@@ -108,8 +112,35 @@ func seedAdmin(ctx context.Context, db *sql.DB, cfg *config.Config) (uuid.UUID, 
 	return id, nil
 }
 
-func seedCategories(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, error) {
-	categories := []seedCategory{
+func seedViewer(ctx context.Context, db *sql.DB) error {
+	var existingID uuid.UUID
+	err := db.QueryRowContext(ctx, "SELECT id FROM admin_users WHERE LOWER(username) = 'viewer'").Scan(&existingID)
+	if err == nil {
+		log.Println("admin 'viewer' sudah ada, melewati pembuatan viewer")
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+
+	password := "Viewer123!"
+	hash, err := utils.HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO admin_users (id, username, password_hash, name, role, is_active)
+		VALUES ($1, 'viewer', $2, 'PR Viewer', 'pr_viewer', TRUE)`, uuid.New(), hash)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("admin dibuat: username=viewer password=%s (role=pr_viewer)", password)
+	return nil
+}
+
+func seedCategories(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, error) {	categories := []seedCategory{
 		{"FAQ", "faq", "Pertanyaan yang sering diajukan seputar operasional laboratorium dan layanan QC."},
 		{"SOP", "sop", "Standard Operating Procedure untuk seluruh proses kerja laboratorium."},
 		{"Work Instruction", "work-instruction", "Instruksi kerja teknis dan langkah operasional peralatan."},

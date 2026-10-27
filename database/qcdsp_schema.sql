@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict CxrG1UVeWQRGA1xISCHQH250uqjTFmOsc9bt8Mem0TtOfEzFEvc0E3ChrhAK6K9
+\restrict LH8l45fJxiUWVbhrAa1DgEmWV8RWNqcyl9H8zAWz1ZHL5OTKm5WX0tlYjBt47Id
 
 -- Dumped from database version 18.6
 -- Dumped by pg_dump version 18.6
@@ -65,7 +65,7 @@ CREATE TABLE public.admin_users (
     last_login_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT admin_users_role_check CHECK (((role)::text = ANY (ARRAY[('super_admin'::character varying)::text, ('admin'::character varying)::text])))
+    CONSTRAINT admin_users_role_check CHECK (((role)::text = ANY ((ARRAY['super_admin'::character varying, 'admin'::character varying, 'pr_viewer'::character varying])::text[])))
 );
 
 
@@ -277,6 +277,13 @@ ALTER TABLE ONLY public.schema_migrations
 
 
 --
+-- Name: idx_admin_users_role; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_admin_users_role ON public.admin_users USING btree (role);
+
+
+--
 -- Name: idx_admin_users_username; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -453,5 +460,5 @@ ALTER TABLE ONLY public.purchase_request_status_history
 -- PostgreSQL database dump complete
 --
 
-\unrestrict CxrG1UVeWQRGA1xISCHQH250uqjTFmOsc9bt8Mem0TtOfEzFEvc0E3ChrhAK6K9
+\unrestrict LH8l45fJxiUWVbhrAa1DgEmWV8RWNqcyl9H8zAWz1ZHL5OTKm5WX0tlYjBt47Id
 

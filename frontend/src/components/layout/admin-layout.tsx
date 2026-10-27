@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
+  Users,
   X,
 } from 'lucide-react'
 import { BrandMarkLight } from '@/components/shared/brand-mark'
@@ -25,14 +26,38 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/contexts/auth-context'
+import { roleLabel } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { getInitials } from '@/lib/format'
+import type { AdminRole } from '@/types'
 
-const adminNav = [
-  { label: 'Dashboard', to: '/admin', icon: LayoutDashboard, end: true },
-  { label: 'Knowledge Management', to: '/admin/knowledge', icon: ClipboardList },
-  { label: 'Category Management', to: '/admin/categories', icon: FolderTree },
-  { label: 'Purchase Request', to: '/admin/purchase-requests', icon: Package },
+const adminNav: Array<{
+  label: string
+  to: string
+  icon: typeof LayoutDashboard
+  end?: boolean
+  roles: AdminRole[]
+}> = [
+  { label: 'Dashboard', to: '/admin', icon: LayoutDashboard, end: true, roles: ['super_admin', 'admin'] },
+  {
+    label: 'Knowledge Management',
+    to: '/admin/knowledge',
+    icon: ClipboardList,
+    roles: ['super_admin', 'admin'],
+  },
+  {
+    label: 'Category Management',
+    to: '/admin/categories',
+    icon: FolderTree,
+    roles: ['super_admin', 'admin'],
+  },
+  {
+    label: 'Purchase Request',
+    to: '/admin/purchase-requests',
+    icon: Package,
+    roles: ['super_admin', 'admin', 'pr_viewer'],
+  },
+  { label: 'Account Management', to: '/admin/accounts', icon: Users, roles: ['super_admin'] },
 ]
 
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
@@ -41,6 +66,7 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
   '/admin/knowledge/new': { title: 'Tambah Dokumen', subtitle: 'Buat konten PDF atau artikel baru' },
   '/admin/categories': { title: 'Category Management', subtitle: 'Kelola kategori dokumen Knowledge Center' },
   '/admin/purchase-requests': { title: 'Purchase Request', subtitle: 'Kelola dan tindak lanjuti pengajuan PR' },
+  '/admin/accounts': { title: 'Account Management', subtitle: 'Kelola akun admin dan hak aksesnya' },
 }
 
 export function AdminLayout() {
@@ -59,7 +85,7 @@ export function AdminLayout() {
     (location.pathname.startsWith('/admin/knowledge/')
       ? { title: 'Edit Dokumen', subtitle: 'Perbarui konten Knowledge Center' }
       : location.pathname.startsWith('/admin/purchase-requests/')
-        ? { title: 'Detail Purchase Request', subtitle: 'Tinjau data pengajuan dan ubah status' }
+        ? { title: 'Detail Purchase Request', subtitle: 'Tinjau data pengajuan Purchase Request' }
         : { title: 'Admin Panel', subtitle: 'QC Digital Service Portal' })
 
   const handleLogout = () => {
@@ -85,20 +111,22 @@ export function AdminLayout() {
             Menu Utama
           </p>
         )}
-        {adminNav.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            title={compact ? item.label : undefined}
-            className={({ isActive }) =>
-              cn('sidebar-link', isActive && 'sidebar-link-active', compact && 'justify-center px-2')
-            }
-          >
-            <item.icon className="h-[18px] w-[18px] shrink-0" />
-            {!compact && <span className="truncate">{item.label}</span>}
-          </NavLink>
-        ))}
+        {adminNav
+          .filter((item) => admin && item.roles.includes(admin.role))
+          .map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              title={compact ? item.label : undefined}
+              className={({ isActive }) =>
+                cn('sidebar-link', isActive && 'sidebar-link-active', compact && 'justify-center px-2')
+              }
+            >
+              <item.icon className="h-[18px] w-[18px] shrink-0" />
+              {!compact && <span className="truncate">{item.label}</span>}
+            </NavLink>
+          ))}
 
         <div className="!mt-4 border-t border-white/10 pt-4">
           {!compact && (
@@ -208,7 +236,7 @@ export function AdminLayout() {
                     <span className="hidden text-left leading-tight sm:block">
                       <span className="block text-xs font-semibold text-navy-900">{admin?.name ?? 'Admin'}</span>
                       <span className="block text-[10px] uppercase tracking-wide text-navy-400">
-                        {admin?.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+                        {roleLabel(admin?.role)}
                       </span>
                     </span>
                   </button>

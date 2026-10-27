@@ -12,6 +12,7 @@ import type {
   PurchaseRequest,
   KnowledgeQuery,
   AdminUser,
+  AdminAccountInput,
 } from '@/types'
 
 export const queryKeys = {
@@ -24,6 +25,7 @@ export const queryKeys = {
   purchaseRequests: (query?: PRQuery) => ['purchase-requests', query ?? {}] as const,
   purchaseRequest: (id?: string) => ['purchase-request', id] as const,
   profile: ['admin-profile'] as const,
+  adminAccounts: ['admin-accounts'] as const,
 }
 
 export function useCategories(scope: 'public' | 'admin' = 'public') {
@@ -289,8 +291,57 @@ export async function trackPurchaseRequest(reference: string): Promise<PurchaseR
   return response.data as PurchaseRequest
 }
 
-export async function uploadArticleImage(file: File): Promise<string> {
-  const formData = new FormData()
+export function useAdminAccounts(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.adminAccounts,
+    queryFn: async () => {
+      const response = await apiGet<AdminUser[]>('/admin/accounts')
+      return response.data ?? []
+    },
+    enabled,
+  })
+}
+
+export function useCreateAdminAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: AdminAccountInput) => {
+      const response = await apiPost<AdminUser>('/admin/accounts', payload)
+      return response.data as AdminUser
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminAccounts })
+    },
+  })
+}
+
+export function useUpdateAdminAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, ...payload }: AdminAccountInput & { id: string }) => {
+      const response = await apiPut<AdminUser>(`/admin/accounts/${id}`, payload)
+      return response.data as AdminUser
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminAccounts })
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile })
+    },
+  })
+}
+
+export function useDeleteAdminAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await apiDelete(`/admin/accounts/${id}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminAccounts })
+    },
+  })
+}
+
+export async function uploadArticleImage(file: File): Promise<string> {  const formData = new FormData()
   formData.append('image', file)
   const response = await apiPost<{ url: string }>('/admin/uploads/image', formData)
   return response.data?.url ?? ''

@@ -18,7 +18,9 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePurchaseRequestDetail, useUpdatePRNotes, useUpdatePRStatus } from '@/hooks/use-api'
+import { useAuth } from '@/contexts/auth-context'
 import { useDocumentTitle } from '@/hooks/use-document-title'
+import { canManagePurchaseRequest } from '@/lib/permissions'
 import { StatusBadge } from '@/components/shared/status-badge'
 import { ErrorState } from '@/components/shared/empty-state'
 import { Button } from '@/components/ui/button'
@@ -45,9 +47,11 @@ import { cn } from '@/lib/utils'
 export function PurchaseRequestDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { admin } = useAuth()
   const { data: pr, isLoading, isError, refetch } = usePurchaseRequestDetail(id)
   const updateStatusMutation = useUpdatePRStatus()
   const updateNotesMutation = useUpdatePRNotes()
+  const canEdit = canManagePurchaseRequest(admin?.role)
 
   const [statusDialogOpen, setStatusDialogOpen] = useState(false)
   const [nextStatus, setNextStatus] = useState<string>('')
@@ -138,17 +142,19 @@ export function PurchaseRequestDetailPage() {
         </div>
 
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setNextStatus('')
-              setStatusNotes('')
-              setStatusDialogOpen(true)
-            }}
-          >
-            <Send className="h-4 w-4" />
-            Ubah Status
-          </Button>
+          {canEdit && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setNextStatus('')
+                setStatusNotes('')
+                setStatusDialogOpen(true)
+              }}
+            >
+              <Send className="h-4 w-4" />
+              Ubah Status
+            </Button>
+          )}
           {spv && (
             <Button
               onClick={() => {
@@ -303,33 +309,35 @@ export function PurchaseRequestDetailPage() {
             </div>
           </section>
 
-          <section className="surface-card p-5">
-            <h3 className="text-sm font-semibold text-navy-900">Ubah Status Cepat</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">Pilih status baru untuk pengajuan ini.</p>
-            <div className="mt-3 grid grid-cols-2 gap-1.5">
-              {PR_STATUSES.map((status) => (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => {
-                    setNextStatus(status)
-                    setStatusDialogOpen(true)
-                  }}
-                  disabled={status === pr.status}
-                  className={cn(
-                    'flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors',
-                    status === pr.status
-                      ? 'cursor-default border-primary-200 bg-primary-50 text-primary-800'
-                      : 'border-navy-200 bg-white text-navy-600 hover:border-primary-300 hover:bg-navy-50',
-                  )}
-                >
-                  <span className={cn('h-1.5 w-1.5 rounded-full', STATUS_META[status].dot)} />
-                  {status}
-                  {status === pr.status && <Check className="ml-auto h-3 w-3" />}
-                </button>
-              ))}
-            </div>
-          </section>
+          {canEdit && (
+            <section className="surface-card p-5">
+              <h3 className="text-sm font-semibold text-navy-900">Ubah Status Cepat</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">Pilih status baru untuk pengajuan ini.</p>
+              <div className="mt-3 grid grid-cols-2 gap-1.5">
+                {PR_STATUSES.map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => {
+                      setNextStatus(status)
+                      setStatusDialogOpen(true)
+                    }}
+                    disabled={status === pr.status}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors',
+                      status === pr.status
+                        ? 'cursor-default border-primary-200 bg-primary-50 text-primary-800'
+                        : 'border-navy-200 bg-white text-navy-600 hover:border-primary-300 hover:bg-navy-50',
+                    )}
+                  >
+                    <span className={cn('h-1.5 w-1.5 rounded-full', STATUS_META[status].dot)} />
+                    {status}
+                    {status === pr.status && <Check className="ml-auto h-3 w-3" />}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           <Alert variant="info">
             <Mail className="h-4 w-4" />
@@ -341,60 +349,62 @@ export function PurchaseRequestDetailPage() {
         </aside>
       </div>
 
-      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Ubah Status Purchase Request</DialogTitle>
-            <DialogDescription>
-              Status saat ini: <strong>{pr.status}</strong>. Perubahan akan tercatat pada riwayat.
-            </DialogDescription>
-          </DialogHeader>
+      {canEdit && (
+        <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Ubah Status Purchase Request</DialogTitle>
+              <DialogDescription>
+                Status saat ini: <strong>{pr.status}</strong>. Perubahan akan tercatat pada riwayat.
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Status Baru</Label>
-              <Select value={nextStatus} onValueChange={setNextStatus}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Pilih status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PR_STATUSES.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Status Baru</Label>
+                <Select value={nextStatus} onValueChange={setNextStatus}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PR_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="status-notes">Catatan Status (opsional)</Label>
+                <Textarea
+                  id="status-notes"
+                  value={statusNotes}
+                  onChange={(event) => setStatusNotes(event.target.value)}
+                  placeholder="Contoh: PO dikirim ke vendor, estimasi tiba 5 hari kerja."
+                  rows={3}
+                  maxLength={2000}
+                />
+                <p className="field-hint">Catatan akan tampil pada riwayat status.</p>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="status-notes">Catatan Status (opsional)</Label>
-              <Textarea
-                id="status-notes"
-                value={statusNotes}
-                onChange={(event) => setStatusNotes(event.target.value)}
-                placeholder="Contoh: PO dikirim ke vendor, estimasi tiba 5 hari kerja."
-                rows={3}
-                maxLength={2000}
-              />
-              <p className="field-hint">Catatan akan tampil pada riwayat status.</p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
-              Batal
-            </Button>
-            <Button
-              onClick={() => void handleStatusUpdate()}
-              loading={updateStatusMutation.isPending}
-              disabled={!nextStatus || nextStatus === pr.status}
-            >
-              Simpan Status
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
+                Batal
+              </Button>
+              <Button
+                onClick={() => void handleStatusUpdate()}
+                loading={updateStatusMutation.isPending}
+                disabled={!nextStatus || nextStatus === pr.status}
+              >
+                Simpan Status
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {updateStatusMutation.isPending && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-950/30 backdrop-blur-sm">

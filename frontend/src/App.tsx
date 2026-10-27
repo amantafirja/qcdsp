@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { AuthProvider } from '@/contexts/auth-context'
 import { ProtectedRoute } from '@/components/shared/protected-route'
+import { RequireRole } from '@/components/shared/require-role'
 import { PublicLayout } from '@/components/layout/public-layout-wrapper'
 import { AdminLayout } from '@/components/layout/admin-layout'
 import { GatewayPage } from '@/pages/public/gateway-page'
@@ -18,6 +19,7 @@ import { KnowledgeEditorPage } from '@/pages/admin/knowledge-editor-page'
 import { CategoryManagementPage } from '@/pages/admin/category-management-page'
 import { PurchaseRequestManagementPage } from '@/pages/admin/purchase-request-management-page'
 import { PurchaseRequestDetailPage } from '@/pages/admin/purchase-request-detail-page'
+import { AccountManagementPage } from '@/pages/admin/account-management-page'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,13 +56,56 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<DashboardPage />} />
-              <Route path="knowledge" element={<KnowledgeManagementPage />} />
-              <Route path="knowledge/new" element={<KnowledgeEditorPage />} />
-              <Route path="knowledge/:id/edit" element={<KnowledgeEditorPage />} />
-              <Route path="categories" element={<CategoryManagementPage />} />
+              <Route
+                index
+                element={
+                  <RequireRole roles={['super_admin', 'admin']}>
+                    <DashboardPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="knowledge"
+                element={
+                  <RequireRole roles={['super_admin', 'admin']}>
+                    <KnowledgeManagementPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="knowledge/new"
+                element={
+                  <RequireRole roles={['super_admin', 'admin']}>
+                    <KnowledgeEditorPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="knowledge/:id/edit"
+                element={
+                  <RequireRole roles={['super_admin', 'admin']}>
+                    <KnowledgeEditorPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="categories"
+                element={
+                  <RequireRole roles={['super_admin', 'admin']}>
+                    <CategoryManagementPage />
+                  </RequireRole>
+                }
+              />
               <Route path="purchase-requests" element={<PurchaseRequestManagementPage />} />
               <Route path="purchase-requests/:id" element={<PurchaseRequestDetailPage />} />
+              <Route
+                path="accounts"
+                element={
+                  <RequireRole roles={['super_admin']}>
+                    <AccountManagementPage />
+                  </RequireRole>
+                }
+              />
             </Route>
 
             <Route path="/admin/*" element={<Navigate to="/admin" replace />} />

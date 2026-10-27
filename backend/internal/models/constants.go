@@ -5,6 +5,27 @@ import (
 	"strings"
 )
 
+const (
+	RoleSuperAdmin = "super_admin"
+	RoleAdmin      = "admin"
+	RolePRViewer   = "pr_viewer"
+)
+
+var AdminRoles = []string{RoleSuperAdmin, RoleAdmin, RolePRViewer}
+
+func IsValidAdminRole(value string) bool {
+	for _, item := range AdminRoles {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func CanManageContent(role string) bool {
+	return role == RoleSuperAdmin || role == RoleAdmin
+}
+
 var OrderTypes = []string{
 	"Reagen",
 	"Tools",

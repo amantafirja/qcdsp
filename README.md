@@ -28,10 +28,19 @@ Stack: **React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui** · **Go (Gin)
 
 ### Admin Panel (JWT)
 - **Login** username/password, token JWT, proteksi route.
+- **Account Management** (khusus Super Admin): CRUD akun admin, ubah role, reset password, aktif/nonaktif, proteksi agar selalu ada minimal satu Super Admin aktif dan akun sendiri tidak bisa dihapus/dinonaktifkan.
 - **Dashboard**: total dokumen/artikel/PDF, total per status PR, chart PR per bulan, distribusi jenis pemesanan, distribusi status, PR terbaru.
 - **Knowledge Management**: CRUD dokumen, upload PDF, upload gambar artikel, publish/unpublish.
 - **Category Management**: CRUD kategori dengan proteksi kategori yang masih dipakai.
-- **Purchase Request Management**: tabel PR, pencarian, filter status/jenis/rentang tanggal, detail PR, ubah status, catatan internal, unduh lampiran, **export Excel**.
+- **Purchase Request Management**: tabel PR, pencarian, filter status/jenis/rentang tanggal, detail PR, ubah status, catatan internal, unduh lampiran, **export Excel**. Untuk `pr_viewer` semua aksi ubah status/catatan disembunyikan dan ditolak backend (403).
+
+**Role & hak akses:**
+
+| Role | Akses |
+|------|-------|
+| `super_admin` | Semua menu + Account Management (buat akun, ubah role, reset password, aktif/nonaktif, hapus) |
+| `admin` | Dashboard, Knowledge, Category, dan Purchase Request (tanpa Account Management) |
+| `pr_viewer` | **Read-only** Purchase Request: daftar, detail, unduh lampiran, export Excel |
 
 ### Status PR
 `Submitted → Review → Approved → Ordered → Received → Closed` (plus `Rejected`).
@@ -50,7 +59,7 @@ qcdsp/
 │   │   ├── config/                 # loader .env
 │   │   ├── database/               # koneksi + runner migrasi
 │   │   ├── handler/                # HTTP layer (Gin)
-│   │   ├── middleware/             # JWT auth, CORS, security headers
+│   │   ├── middleware/             # JWT auth, RBAC role, CORS, security headers
 │   │   ├── models/                 # entity & konstanta
 │   │   ├── repository/             # akses PostgreSQL (SQL murni)
 │   │   ├── router/                 # definisi route
@@ -58,7 +67,8 @@ qcdsp/
 │   │   └── utils/                  # JWT, response, upload, password
 │   ├── migrations/
 │   │   ├── embed.go
-│   │   └── 001_init.sql            # schema PostgreSQL
+│   │   ├── 001_init.sql            # schema PostgreSQL
+│   │   └── 002_admin_roles.sql     # role super_admin/admin/pr_viewer
 │   ├── uploads/                    # file upload (runtime)
 │   ├── .env.example
 │   ├── go.mod
@@ -75,7 +85,7 @@ qcdsp/
 │   │   ├── lib/                    # api client, format, constants, export
 │   │   ├── pages/
 │   │   │   ├── public/             # gateway, knowledge, PR, tracking, login
-│   │   │   └── admin/              # dashboard, knowledge, category, PR
+│   │   │   └── admin/              # dashboard, knowledge, category, PR, akun
 │   │   ├── types/
 │   │   ├── App.tsx
 │   │   ├── main.tsx
@@ -138,13 +148,14 @@ go run ./cmd/server    # API di http://localhost:8080
 
 Health check: `GET http://localhost:8080/health`
 
-**Akun admin dari seeder:**
+**Akun dari seeder:**
 
-| Username | Password |
-|----------|----------|
-| `admin` | `Admin123!` |
+| Username | Password | Role |
+|----------|----------|------|
+| `admin` | `Admin123!` | `super_admin` |
+| `viewer` | `Viewer123!` | `pr_viewer` |
 
-> Seeder bersifat idempotent: jika data sudah ada, seed akan dilewati. Ganti password default sebelum digunakan di produksi.
+> Seeder bersifat idempotent: jika data sudah ada, seed akan dilewati. Ganti password default sebelum digunakan di produksi, dan atur pembagian akun lewat menu **Account Management**.
 
 ### 4.3 Frontend
 
@@ -365,7 +376,11 @@ requester_name, reason, spv_approval (file, wajib), quotation (file, opsional)
 |--------|----------|-----------|
 | POST | `/admin/login` | Login, mengembalikan JWT |
 | GET | `/admin/me` | Profil admin |
-| GET | `/admin/dashboard` | Statistik + chart + PR terbaru |
+| GET | `/admin/accounts` | Daftar akun admin (**super_admin**) |
+| POST | `/admin/accounts` | Buat akun admin (**super_admin**) |
+| PUT | `/admin/accounts/:id` | Ubah nama/username/role/status/password (**super_admin**) |
+| DELETE | `/admin/accounts/:id` | Hapus akun (**super_admin**, bukan akun sendiri) |
+| GET | `/admin/dashboard` | Statistik + chart + PR terbaru (`super_admin`, `admin`) |
 | GET | `/admin/categories` | Semua kategori + jumlah dokumen |
 | POST | `/admin/categories` | Buat kategori |
 | PUT | `/admin/categories/:id` | Update kategori |
@@ -377,17 +392,19 @@ requester_name, reason, spv_approval (file, wajib), quotation (file, opsional)
 | PUT | `/admin/knowledge/:id/publish` | Publish/unpublish |
 | DELETE | `/admin/knowledge/:id` | Hapus dokumen + file |
 | POST | `/admin/uploads/image` | Upload gambar artikel |
-| GET | `/admin/purchase-requests` | Daftar PR + filter |
-| GET | `/admin/purchase-requests/:id` | Detail PR + riwayat |
-| PUT | `/admin/purchase-requests/:id/status` | Ubah status + catatan |
-| PUT | `/admin/purchase-requests/:id` | Simpan catatan internal |
-| GET | `/admin/purchase-requests/:id/attachments/:attachmentId` | Unduh lampiran |
+| GET | `/admin/purchase-requests` | Daftar PR + filter (semua role) |
+| GET | `/admin/purchase-requests/:id` | Detail PR + riwayat (semua role) |
+| PUT | `/admin/purchase-requests/:id/status` | Ubah status + catatan (`super_admin`, `admin`) |
+| PUT | `/admin/purchase-requests/:id` | Simpan catatan internal (`super_admin`, `admin`) |
+| GET | `/admin/purchase-requests/:id/attachments/:attachmentId` | Unduh lampiran (semua role) |
 
 Semua endpoint `/admin/*` (kecuali login) memerlukan header:
 
 ```
 Authorization: Bearer <token>
 ```
+
+Role dibaca ulang dari database pada setiap request, jadi perubahan role atau penonaktifan akun langsung berlaku tanpa menunggu token kedaluwarsa. Endpoint di luar hak akses role akan mengembalikan **403**.
 
 Query `GET /admin/purchase-requests`: `search`, `status`, `order_type`, `date_from`, `date_to`, `sort`, `page`, `page_size`.
 
@@ -419,7 +436,8 @@ curl http://localhost:8080/api/purchase-requests/status/PR-20260601-0001
 
 - **Frontend**: Zod schema + React Hook Form, validasi tipe/ukuran file sebelum upload, feedback per field.
 - **Backend**: validasi wajib di service layer (panjang, enum, kuantitas, konsistensi tipe konten, syarat `Lain-Lain`), validasi ekstensi & ukuran file, serta constraint database sebagai lapisan terakhir.
-- **Password**: bcrypt (cost default).
+- **Password**: bcrypt (cost default), minimal 8 karakter, reset password hanya oleh Super Admin.
+- **RBAC**: role `super_admin` / `admin` / `pr_viewer`; middleware memuat ulang akun dari database setiap request (akun nonaktif langsung ditolak, perubahan role langsung berlaku), endpoint di luar hak akses → 403, proteksi minimal satu Super Admin aktif, dan akun sendiri tidak bisa dihapus/dinonaktifkan.
 - **JWT**: HS256, secret minimal 32 karakter, expiry terkonfigurasi, penolakan signing method non-HMAC.
 - **Upload**: nama file di-generate UUID (mencegah path traversal & overwrite), ekstensi di-whitelist, limit body via `http.MaxBytesReader`, file dihapus jika validasi gagal.
 - **CORS**: whitelist origin dari env, bukan `*`.
@@ -500,7 +518,8 @@ Catatan produksi:
 
 `go run ./cmd/seed` membuat:
 
-- 1 admin (`admin` / `Admin123!`)
+- 1 admin (`admin` / `Admin123!`, role `super_admin`)
+- 1 akun view-only (`viewer` / `Viewer123!`, role `pr_viewer`)
 - 7 kategori: FAQ, SOP, Work Instruction, Manual, Troubleshooting, Artikel, Dokumen PDF
 - 8 dokumen (7 published + 1 draft artikel); 3 di antaranya PDF contoh yang di-generate otomatis lengkap dengan xref sehingga preview di browser berjalan normal
 - 14 Purchase Request dengan distribusi status dan rentang 12 bulan terakhir, lengkap dengan lampiran SPV contoh (PDF valid) dan riwayat status
@@ -539,6 +558,8 @@ Catatan produksi:
 | Frontend 404 setelah refresh | Konfigurasi SPA fallback (`try_files ... /index.html`) |
 | Upload 413 | Naikkan `client_max_body_size` di reverse proxy |
 | Login gagal | Jalankan seeder; cek username/password |
+| Menu atau endpoint mengembalikan 403 | Role akun tidak punya hak akses; atur lewat **Account Management** (Super Admin) |
+| Login ditolak "Akun admin tidak aktif" | Akun dinonaktifkan Super Admin; aktifkan kembali di Account Management |
 | `npm install` lambat/ECONNRESET | Gunakan `--registry=https://registry.npmmirror.com` |
 | `Failed to resolve entry for package ...` / modul tidak ditemukan | `node_modules` ter-ekstrak tidak lengkap (install terputus). Stop dev server, hapus `node_modules` + `node_modules/.vite`, lalu `npm ci` |
 | Preview/download PDF 404 | File tidak ada di `backend/uploads` (tidak ikut git). Copy folder uploads dari PC asal, atau pakai database baru + seeder |

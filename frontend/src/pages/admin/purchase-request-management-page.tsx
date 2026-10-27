@@ -13,6 +13,8 @@ import {
 import { toast } from 'sonner'
 import { usePurchaseRequests } from '@/hooks/use-api'
 import { apiGet } from '@/lib/api'
+import { useAuth } from '@/contexts/auth-context'
+import { canManagePurchaseRequest } from '@/lib/permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { SearchInput } from '@/components/shared/search-input'
 import { PaginationBar } from '@/components/shared/pagination-bar'
@@ -36,6 +38,8 @@ import { exportPurchaseRequestsToExcel } from '@/lib/export-excel'
 
 export function PurchaseRequestManagementPage() {
   useDocumentTitle('Purchase Request Management')
+  const { admin } = useAuth()
+  const canEdit = canManagePurchaseRequest(admin?.role)
   const [searchParams, setSearchParams] = useSearchParams()
   const [exporting, setExporting] = useState(false)
 
@@ -109,7 +113,9 @@ export function PurchaseRequestManagementPage() {
         <div>
           <h2 className="text-xl font-bold tracking-tight text-navy-900">Purchase Request Management</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Tinjau seluruh pengajuan PR, ubah status, dan unduh lampiran.
+            {canEdit
+              ? 'Tinjau seluruh pengajuan PR, ubah status, dan unduh lampiran.'
+              : 'Lihat seluruh pengajuan PR dan unduh lampiran (mode read-only).'}
           </p>
         </div>
         <div className="flex gap-2">

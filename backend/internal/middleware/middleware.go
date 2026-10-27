@@ -1,12 +1,19 @@
 package middleware
 
 import (
+	"context"
 	"strings"
 
+	"qcdsp/backend/internal/models"
 	"qcdsp/backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
+
+type AdminLookup interface {
+	FindByID(ctx context.Context, id uuid.UUID) (*models.AdminUser, error)
+}
 
 func Auth(tokens *utils.TokenManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -36,8 +43,54 @@ func Auth(tokens *utils.TokenManager) gin.HandlerFunc {
 	}
 }
 
-func CORS(allowedOrigins []string) gin.HandlerFunc {
-	allowed := make(map[string]bool, len(allowedOrigins))
+func LoadAdmin(admins AdminLookup) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		value, exists := c.Get("admin_id")
+		if !exists {
+			utils.Unauthorized(c, "Token autentikasi diperlukan")
+			return
+		}
+		adminID, ok := value.(uuid.UUID)
+		if !ok {
+			utils.Unauthorized(c, "Token tidak valid")
+			return
+		}
+
+		admin, err := admins.FindByID(c.Request.Context(), adminID)
+		if err != nil {
+			utils.Unauthorized(c, "Akun admin tidak ditemukan")
+			return
+		}
+		if !admin.IsActive {
+			utils.Forbidden(c, "Akun admin tidak aktif")
+			return
+		}
+
+		c.Set("admin_role", admin.Role)
+		c.Set("admin_username", admin.Username)
+		c.Set("admin_name", admin.Name)
+		c.Next()
+	}
+}
+
+func RequireRoles(roles ...string) gin.HandlerFunc {
+	allowed := make(map[string]bool, len(roles))
+	for _, role := range roles {
+		allowed[role] = true
+	}
+
+	return func(c *gin.Context) {
+		value, exists := c.Get("admin_role")
+		role, _ := value.(string)
+		if !exists || !allowed[role] {
+			utils.Forbidden(c, "Anda tidak memiliki hak akses untuk aksi ini")
+			return
+		}
+		c.Next()
+	}
+}
+
+func CORS(allowedOrigins []string) gin.HandlerFunc {	allowed := make(map[string]bool, len(allowedOrigins))
 	for _, origin := range allowedOrigins {
 		allowed[origin] = true
 	}
