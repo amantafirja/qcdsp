@@ -448,18 +448,23 @@ func pdfSampleLines(title string) []string {
 	}
 }
 
+type seedPRItem struct {
+	ItemName     string
+	BrandCatalog string
+	Quantity     int
+	Unit         string
+}
+
 type seedPR struct {
-	Reference     string
-	Description   string
-	OrderType     string
-	CustomType    string
-	BrandCatalog  string
-	Quantity      int
-	Requester     string
-	Reason        string
-	Status        string
-	Notes         string
-	DaysAgo       int
+	Description string
+	OrderType   string
+	CustomType  string
+	Requester   string
+	Reason      string
+	Status      string
+	Notes       string
+	DaysAgo     int
+	Items       []seedPRItem
 }
 
 func seedPurchaseRequests(ctx context.Context, db *sql.DB, uploadDir string) error {
@@ -473,20 +478,37 @@ func seedPurchaseRequests(ctx context.Context, db *sql.DB, uploadDir string) err
 	}
 
 	requests := []seedPR{
-		{"PR-20260601-0001", "Pembelian reagen buffer pH 7,00 untuk kebutuhan pengujian harian", "Reagen", "", "MERCK 1.098439.1000", 6, "Rina Wulandari", "Stok buffer pH 7,00 tersisa 1 botol dan kebutuhan pengujian meningkat.", "Closed", "Barang sudah diterima dan disimpan di gudang reagen.", 147},
-		{"PR-20260612-0002", "Pengadaan tips pipet 1000 µL steril", "Tools Mikro", "", "AXYGEN T-1000-B", 20, "Budi Santoso", "Tips pipet habis akibat penambahan beban pengujian mikrobiologi.", "Received", "Diterima lengkap 20 box.", 136},
-		{"PR-20260625-0003", "Pembelian gas nitrogen untuk GC", "Gas", "", "SAMATOR N2 99.999%", 2, "Andi Pratama", "Stok gas nitrogen tersisa 1 tabung, kebutuhan analisis GC mingguan.", "Ordered", "PO dikirim ke vendor, estimasi tiba 5 hari kerja.", 123},
-		{"PR-20260708-0004", "Pengadaan kolom HPLC C18", "Lain-Lain", "Spare Part Instrumen", "WATERS WAT054275", 1, "Siti Nurhaliza", "Kolom HPLC mengalami penurunan resolusi dan perlu penggantian.", "Approved", "Disetujui, menunggu proses pengadaan.", 110},
-		{"PR-20260719-0005", "Pembelian reference standard untuk uji kadar", "RS/Reference Standard", "", "USP 1234567", 2, "Dewi Lestari", "Reference standard yang ada mendekati tanggal kedaluwarsa.", "Review", "Sedang diverifikasi oleh tim QC.", 99},
-		{"PR-20260802-0006", "Pengadaan alat gelas laboratorium", "Expense Item", "", "IWAKI 5000-100", 12, "Fajar Nugroho", "Beaker glass pecah saat proses pencucian.", "Submitted", "", 85},
-		{"PR-20260815-0007", "Pembelian media kultur mikrobiologi", "Reagen Mikro", "", "MERCK 1.054426.0500", 8, "Rina Wulandari", "Kebutuhan media untuk pengujian bioburden bulanan.", "Approved", "Approved oleh SPV, menunggu PO.", 72},
-		{"PR-20260828-0008", "Analisa external logam berat sampel air", "Analisa External", "", "Lab Eksternal - SUCOFINDO", 5, "Budi Santoso", "Kapasitas internal tidak mencukupi untuk parameter logam berat.", "Rejected", "Ditolak karena anggaran periode ini sudah terpakai.", 59},
-		{"PR-20260910-0009", "Pembelian sarung tangan nitrile", "Expense Item", "", "ANSELL 92-600", 30, "Andi Pratama", "Stok sarung tangan untuk analis tersisa 5 box.", "Closed", "Diterima dan didistribusikan ke lab.", 46},
-		{"PR-20260922-0010", "Pengadaan vial amber 20 mL", "Tools", "", "SCHOTT 2180136", 15, "Siti Nurhaliza", "Kebutuhan vial untuk penyimpanan sampel retain.", "Received", "Diterima 15 pack.", 34},
-		{"PR-20261001-0011", "Pembelian reagen untuk uji COD", "Reagen", "", "HACH 2125915", 4, "Dewi Lestari", "Reagen COD tersisa 1 set, pengujian limbah meningkat.", "Ordered", "PO dikirim, estimasi 7 hari.", 25},
-		{"PR-20261012-0012", "Pengadaan kuvet spektrofotometer", "Tools", "", "HELLMA 100-10-40", 20, "Fajar Nugroho", "Kuvet lama banyak tergores sehingga mempengaruhi absorbansi.", "Review", "Menunggu verifikasi spesifikasi.", 14},
-		{"PR-20261020-0013", "Pembelian kertas saring Whatman", "Expense Item", "", "WHATMAN 1001-125", 10, "Rina Wulandari", "Persediaan kertas saring untuk filtrasi sampel menipis.", "Submitted", "", 6},
-		{"PR-20261024-0014", "Pengadaan termometer digital terkalibrasi", "Tools Mikro", "", "TESTO 1089764", 3, "Budi Santoso", "Termometer ruang penyimpanan perlu penggantian karena drift.", "Submitted", "", 2},
+		{"Pembelian reagen buffer pH 7,00 untuk kebutuhan pengujian harian", "Reagen", "", "Rina Wulandari", "Stok buffer pH 7,00 tersisa 1 botol dan kebutuhan pengujian meningkat.", "done", "Barang sudah diterima dan disimpan di gudang reagen.", 147,
+			[]seedPRItem{{"Reagen buffer pH 7,00", "MERCK 1.098439.1000", 6, "botol"}}},
+		{"Pengadaan tips pipet 1000 µL steril", "Tools Mikro", "", "Budi Santoso", "Tips pipet habis akibat penambahan beban pengujian mikrobiologi.", "po_approve", "PO disetujui, menunggu pengiriman.", 136,
+			[]seedPRItem{{"Tips pipet 1000 µL steril", "AXYGEN T-1000-B", 20, "box"}}},
+		{"Pembelian gas nitrogen untuk GC", "Gas", "", "Andi Pratama", "Stok gas nitrogen tersisa 1 tabung, kebutuhan analisis GC mingguan.", "pending_po", "PO dikirim ke vendor, estimasi tiba 5 hari kerja.", 123,
+			[]seedPRItem{{"Gas nitrogen 99.999%", "SAMATOR N2 99.999%", 2, "tabung"}}},
+		{"Pengadaan kolom HPLC C18", "Lain-Lain", "Spare Part Instrumen", "Siti Nurhaliza", "Kolom HPLC mengalami penurunan resolusi dan perlu penggantian.", "op_manager", "Disetujui, menunggu proses pengadaan.", 110,
+			[]seedPRItem{{"Kolom HPLC C18", "WATERS WAT054275", 1, "unit"}}},
+		{"Pembelian reference standard untuk uji kadar", "RS/Reference Standard", "", "Dewi Lestari", "Reference standard yang ada mendekati tanggal kedaluwarsa.", "op_proposal", "Sedang diverifikasi oleh tim QC.", 99,
+			[]seedPRItem{{"Reference standard uji kadar", "USP 1234567", 2, "vial"}}},
+		{"Pengadaan alat gelas laboratorium", "Expense Item", "", "Fajar Nugroho", "Beaker glass pecah saat proses pencucian.", "form_created", "", 85,
+			[]seedPRItem{
+				{"Beaker glass 500 mL", "IWAKI 5000-100", 6, "pcs"},
+				{"Beaker glass 1000 mL", "IWAKI 5000-200", 6, "pcs"},
+			}},
+		{"Pembelian media kultur mikrobiologi", "Reagen Mikro", "", "Rina Wulandari", "Kebutuhan media untuk pengujian bioburden bulanan.", "op_manager", "Approved oleh SPV, menunggu PO.", 72,
+			[]seedPRItem{{"Media kultur TSA", "MERCK 1.054426.0500", 8, "botol"}}},
+		{"Analisa external logam berat sampel air", "Analisa External", "", "Budi Santoso", "Kapasitas internal tidak mencukupi untuk parameter logam berat.", "rejected", "Ditolak karena anggaran periode ini sudah terpakai.", 59,
+			[]seedPRItem{{"Analisa logam berat (Pb, Cd, Hg)", "Lab Eksternal - SUCOFINDO", 5, "sampel"}}},
+		{"Pembelian sarung tangan nitrile", "Expense Item", "", "Andi Pratama", "Stok sarung tangan untuk analis tersisa 5 box.", "done", "Diterima dan didistribusikan ke lab.", 46,
+			[]seedPRItem{{"Sarung tangan nitrile M", "ANSELL 92-600", 30, "box"}}},
+		{"Pengadaan vial amber 20 mL", "Tools", "", "Siti Nurhaliza", "Kebutuhan vial untuk penyimpanan sampel retain.", "po_approve", "Diterima 15 pack.", 34,
+			[]seedPRItem{{"Vial amber 20 mL", "SCHOTT 2180136", 15, "pack"}}},
+		{"Pembelian reagen untuk uji COD", "Reagen", "", "Dewi Lestari", "Reagen COD tersisa 1 set, pengujian limbah meningkat.", "pending_po", "PO dikirim, estimasi 7 hari.", 25,
+			[]seedPRItem{{"Reagen COD", "HACH 2125915", 4, "set"}}},
+		{"Pengadaan kuvet spektrofotometer", "Tools", "", "Fajar Nugroho", "Kuvet lama banyak tergores sehingga mempengaruhi absorbansi.", "op_penawaran", "Menunggu penawaran purchasing.", 14,
+			[]seedPRItem{{"Kuvet spektrofotometer", "HELLMA 100-10-40", 20, "pcs"}}},
+		{"Pembelian kertas saring Whatman", "Expense Item", "", "Rina Wulandari", "Persediaan kertas saring untuk filtrasi sampel menipis.", "form_created", "", 6,
+			[]seedPRItem{{"Kertas saring Whatman", "WHATMAN 1001-125", 10, "pack"}}},
+		{"Pengadaan termometer digital terkalibrasi", "Tools Mikro", "", "Budi Santoso", "Termometer ruang penyimpanan perlu penggantian karena drift.", "form_created", "", 2,
+			[]seedPRItem{{"Termometer digital terkalibrasi", "TESTO 1089764", 3, "unit"}}},
 	}
 
 	attachmentsDir := filepath.Join(uploadDir, "purchase-requests", time.Now().Format("2006/01"))
@@ -494,9 +516,14 @@ func seedPurchaseRequests(ctx context.Context, db *sql.DB, uploadDir string) err
 		return err
 	}
 
+	counters := make(map[string]int)
 	for _, item := range requests {
 		id := uuid.New()
 		createdAt := time.Now().AddDate(0, 0, -item.DaysAgo)
+
+		period := createdAt.Format("0106")
+		counters[period]++
+		reference := fmt.Sprintf("PRG/1GQ01/%s/%05d", period, counters[period])
 
 		var customType *string
 		if item.CustomType != "" {
@@ -509,26 +536,38 @@ func seedPurchaseRequests(ctx context.Context, db *sql.DB, uploadDir string) err
 
 		_, err := db.ExecContext(ctx, `
 			INSERT INTO purchase_requests (
-				id, reference_number, description, order_type, custom_order_type, brand_catalog,
-				quantity, requester_name, reason, status, internal_notes, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)`,
-			id, item.Reference, item.Description, item.OrderType, customType, item.BrandCatalog,
-			item.Quantity, item.Requester, item.Reason, item.Status, notes, createdAt,
+				id, reference_number, description, order_type, custom_order_type,
+				requester_name, reason, status, internal_notes, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
+			id, reference, item.Description, item.OrderType, customType,
+			item.Requester, item.Reason, item.Status, notes, createdAt,
 		)
 		if err != nil {
 			return err
 		}
 
-		relative, spvName, pdfSize, pdfErr := writeApprovalPDF(uploadDir, item.Reference, item.Requester)
+		for index, line := range item.Items {
+			_, err = db.ExecContext(ctx, `
+				INSERT INTO purchase_request_items (
+					id, purchase_request_id, item_name, brand_catalog, quantity, unit, sort_order, created_at
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+				uuid.New(), id, line.ItemName, line.BrandCatalog, line.Quantity, line.Unit, index+1, createdAt)
+			if err != nil {
+				return err
+			}
+		}
+
+		relative, spvName, pdfSize, pdfErr := writeApprovalPDF(uploadDir, reference, item.Requester)
 		if pdfErr != nil {
 			return pdfErr
 		}
 
+		safeReference := strings.ReplaceAll(reference, "/", "-")
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO attachments (
 				id, purchase_request_id, attachment_type, original_name, stored_name, mime_type, size_bytes, file_path, created_at
 			) VALUES ($1, $2, 'spv_approval', $3, $4, 'application/pdf', $5, $6, $7)`,
-			uuid.New(), id, fmt.Sprintf("SPV-Approval-%s.pdf", item.Reference), spvName, pdfSize, relative, createdAt,
+			uuid.New(), id, fmt.Sprintf("SPV-Approval-%s.pdf", safeReference), spvName, pdfSize, relative, createdAt,
 		)
 		if err != nil {
 			return err
@@ -536,13 +575,13 @@ func seedPurchaseRequests(ctx context.Context, db *sql.DB, uploadDir string) err
 
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO purchase_request_status_history (id, purchase_request_id, status, notes, created_at)
-			VALUES ($1, $2, 'Submitted', 'Purchase Request dibuat', $3)`,
+			VALUES ($1, $2, 'form_created', 'Purchase Request dibuat', $3)`,
 			uuid.New(), id, createdAt)
 		if err != nil {
 			return err
 		}
 
-		if item.Status != "Submitted" {
+		if item.Status != "form_created" {
 			_, err = db.ExecContext(ctx, `
 				INSERT INTO purchase_request_status_history (id, purchase_request_id, status, notes, created_at)
 				VALUES ($1, $2, $3, $4, $5)`,
@@ -550,6 +589,28 @@ func seedPurchaseRequests(ctx context.Context, db *sql.DB, uploadDir string) err
 			if err != nil {
 				return err
 			}
+		}
+
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO purchase_request_audit_logs (
+				purchase_request_id, action, actor_name, actor_role, notes, after_data, created_at
+			) VALUES ($1, 'created', $2, 'user', 'Purchase Request dibuat', $3, $4)`,
+			id, item.Requester,
+			fmt.Sprintf(`{"reference_number":%q,"status":%q,"order_type":%q}`, reference, item.Status, item.OrderType),
+			createdAt)
+		if err != nil {
+			return err
+		}
+	}
+
+	for period, last := range counters {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO pr_number_counters (period, last_number)
+			VALUES ($1, $2)
+			ON CONFLICT (period) DO UPDATE
+			SET last_number = GREATEST(pr_number_counters.last_number, EXCLUDED.last_number),
+			    updated_at = NOW()`, period, last); err != nil {
+			return err
 		}
 	}
 

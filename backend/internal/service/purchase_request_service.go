@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math/rand"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,15 +15,22 @@ import (
 	"github.com/google/uuid"
 )
 
+type PRItemInput struct {
+	ItemName     string
+	BrandCatalog string
+	Quantity     int
+	Unit         string
+	Notes        string
+}
+
 type PRInput struct {
-	Description      string
-	OrderType        string
-	CustomOrderType  string
-	BrandCatalog     string
-	Quantity         int
-	RequesterName    string
-	Reason           string
-	SPVAttachment    *utils.UploadedFile
+	Description         string
+	OrderType           string
+	CustomOrderType     string
+	RequesterName       string
+	Reason              string
+	Items               []PRItemInput
+	SPVAttachment       *utils.UploadedFile
 	QuotationAttachment *utils.UploadedFile
 }
 
@@ -43,13 +50,27 @@ type PRStatusInput struct {
 	Notes  string
 }
 
+type PRActorInput struct {
+	ID   uuid.UUID
+	Name string
+	Role string
+}
+
+type PRMergeInput struct {
+	MemberIDs []uuid.UUID
+}
+
 type PurchaseRequestService interface {
 	Create(ctx context.Context, input PRInput) (*models.PurchaseRequest, error)
 	Track(ctx context.Context, reference string) (*models.PurchaseRequest, error)
 	List(ctx context.Context, query PRQuery) ([]models.PurchaseRequest, models.Pagination, error)
 	Get(ctx context.Context, id uuid.UUID) (*models.PurchaseRequest, error)
-	UpdateStatus(ctx context.Context, id uuid.UUID, input PRStatusInput, adminID uuid.UUID) (*models.PurchaseRequest, error)
-	UpdateNotes(ctx context.Context, id uuid.UUID, notes string) (*models.PurchaseRequest, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, input PRStatusInput, actor PRActorInput) (*models.PurchaseRequest, error)
+	UpdateNotes(ctx context.Context, id uuid.UUID, notes string, actor PRActorInput) (*models.PurchaseRequest, error)
+	Merge(ctx context.Context, masterID uuid.UUID, input PRMergeInput, actor PRActorInput) (*models.PurchaseRequest, error)
+	Unmerge(ctx context.Context, masterID uuid.UUID, input PRMergeInput, actor PRActorInput) (*models.PurchaseRequest, error)
+	Delete(ctx context.Context, id uuid.UUID, actor PRActorInput) error
+	AuditTrail(ctx context.Context, id uuid.UUID) ([]models.PRAuditLog, error)
 	Dashboard(ctx context.Context) (*models.DashboardData, error)
 }
 
@@ -69,7 +90,6 @@ func (s *purchaseRequestService) Create(ctx context.Context, input PRInput) (*mo
 	input.Description = strings.TrimSpace(input.Description)
 	input.OrderType = strings.TrimSpace(input.OrderType)
 	input.CustomOrderType = strings.TrimSpace(input.CustomOrderType)
-	input.BrandCatalog = strings.TrimSpace(input.BrandCatalog)
 	input.RequesterName = strings.TrimSpace(input.RequesterName)
 	input.Reason = strings.TrimSpace(input.Reason)
 
@@ -95,18 +115,6 @@ func (s *purchaseRequestService) Create(ctx context.Context, input PRInput) (*mo
 		input.CustomOrderType = ""
 	}
 
-	if input.BrandCatalog == "" {
-		validation.add("brand_catalog", "Brand (merk) dan nomor katalog wajib diisi")
-	} else if len(input.BrandCatalog) > 255 {
-		validation.add("brand_catalog", "Brand/katalog maksimal 255 karakter")
-	}
-
-	if input.Quantity < 1 {
-		validation.add("quantity", "Jumlah minimal 1")
-	} else if input.Quantity > 1_000_000 {
-		validation.add("quantity", "Jumlah tidak wajar")
-	}
-
 	if input.RequesterName == "" {
 		validation.add("requester_name", "Nama pemesan wajib diisi")
 	} else if len(input.RequesterName) > 150 {
@@ -125,13 +133,57 @@ func (s *purchaseRequestService) Create(ctx context.Context, input PRInput) (*mo
 		validation.add("spv_approval", "Bukti SPV approve pemesanan wajib diunggah")
 	}
 
-	if validation.hasErrors() {
-		return nil, validation
+	if len(input.Items) == 0 {
+		validation.add("items", "Minimal satu item pemesanan wajib diisi")
+	} else if len(input.Items) > 50 {
+		validation.add("items", "Maksimal 50 item per Purchase Request")
 	}
 
-	reference, err := s.generateReference(ctx)
-	if err != nil {
-		return nil, err
+	items := make([]models.PurchaseRequestItem, 0, len(input.Items))
+	for index, item := range input.Items {
+		item.ItemName = strings.TrimSpace(item.ItemName)
+		item.BrandCatalog = strings.TrimSpace(item.BrandCatalog)
+		item.Unit = strings.TrimSpace(item.Unit)
+		item.Notes = strings.TrimSpace(item.Notes)
+		if item.Unit == "" {
+			item.Unit = "unit"
+		}
+
+		if item.ItemName == "" {
+			validation.add(itemField(index, "item_name"), "Nama item wajib diisi")
+		} else if len(item.ItemName) > 255 {
+			validation.add(itemField(index, "item_name"), "Nama item maksimal 255 karakter")
+		}
+		if len(item.BrandCatalog) > 255 {
+			validation.add(itemField(index, "brand_catalog"), "Brand/katalog maksimal 255 karakter")
+		}
+		if item.Quantity < 1 {
+			validation.add(itemField(index, "quantity"), "Jumlah minimal 1")
+		} else if item.Quantity > 1_000_000 {
+			validation.add(itemField(index, "quantity"), "Jumlah tidak wajar")
+		}
+		if len(item.Unit) > 50 {
+			validation.add(itemField(index, "unit"), "Satuan maksimal 50 karakter")
+		}
+		if len(item.Notes) > 500 {
+			validation.add(itemField(index, "notes"), "Catatan item maksimal 500 karakter")
+		}
+
+		var notes *string
+		if item.Notes != "" {
+			notes = &item.Notes
+		}
+		items = append(items, models.PurchaseRequestItem{
+			ItemName:     item.ItemName,
+			BrandCatalog: item.BrandCatalog,
+			Quantity:     item.Quantity,
+			Unit:         item.Unit,
+			Notes:        notes,
+		})
+	}
+
+	if validation.hasErrors() {
+		return nil, validation
 	}
 
 	var customOrderType *string
@@ -141,15 +193,12 @@ func (s *purchaseRequestService) Create(ctx context.Context, input PRInput) (*mo
 
 	pr := &models.PurchaseRequest{
 		ID:              uuid.New(),
-		ReferenceNumber: reference,
 		Description:     input.Description,
 		OrderType:       input.OrderType,
 		CustomOrderType: customOrderType,
-		BrandCatalog:    input.BrandCatalog,
-		Quantity:        input.Quantity,
 		RequesterName:   input.RequesterName,
 		Reason:          input.Reason,
-		Status:          "Submitted",
+		Status:          models.PRStatusFormCreated,
 	}
 
 	attachments := []models.Attachment{{
@@ -169,10 +218,15 @@ func (s *purchaseRequestService) Create(ctx context.Context, input PRInput) (*mo
 		})
 	}
 
-	if err := s.requests.CreateWithAttachments(ctx, pr, attachments); err != nil {
+	actor := repository.PRActor{Name: input.RequesterName, Role: "user"}
+	if err := s.requests.Create(ctx, pr, items, attachments, actor); err != nil {
 		return nil, err
 	}
 	return s.requests.FindByID(ctx, pr.ID)
+}
+
+func itemField(index int, field string) string {
+	return "items[" + strconv.Itoa(index) + "]." + field
 }
 
 func (s *purchaseRequestService) Track(ctx context.Context, reference string) (*models.PurchaseRequest, error) {
@@ -188,7 +242,8 @@ func (s *purchaseRequestService) Track(ctx context.Context, reference string) (*
 		return nil, err
 	}
 	for i := range pr.Attachments {
-		pr.Attachments[i].DownloadURL = "/api/purchase-requests/status/" + pr.ReferenceNumber + "/attachments/" + pr.Attachments[i].ID.String()
+		pr.Attachments[i].DownloadURL = "/api/purchase-requests/track/attachments/" +
+			pr.Attachments[i].ID.String() + "?reference=" + url.QueryEscape(pr.ReferenceNumber)
 	}
 	return pr, nil
 }
@@ -219,7 +274,7 @@ func (s *purchaseRequestService) Get(ctx context.Context, id uuid.UUID) (*models
 	return pr, err
 }
 
-func (s *purchaseRequestService) UpdateStatus(ctx context.Context, id uuid.UUID, input PRStatusInput, adminID uuid.UUID) (*models.PurchaseRequest, error) {
+func (s *purchaseRequestService) UpdateStatus(ctx context.Context, id uuid.UUID, input PRStatusInput, actor PRActorInput) (*models.PurchaseRequest, error) {
 	input.Status = strings.TrimSpace(input.Status)
 	input.Notes = strings.TrimSpace(input.Notes)
 
@@ -236,7 +291,38 @@ func (s *purchaseRequestService) UpdateStatus(ctx context.Context, id uuid.UUID,
 		return nil, validation
 	}
 
-	if err := s.requests.UpdateStatus(ctx, id, input.Status, input.Notes, &adminID); err != nil {
+	current, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if models.IsTerminalStatus(current.Status) {
+		return nil, ValidationErrors{"status": "Status akhir tidak dapat diubah"}
+	}
+	if input.Status == current.Status {
+		return nil, ValidationErrors{"status": "Status baru sama dengan status saat ini"}
+	}
+	if (input.Status == models.PRStatusRejected || input.Status == models.PRStatusCancelled) && input.Notes == "" {
+		return nil, ValidationErrors{"notes": "Catatan wajib diisi untuk status Selesai (Reject) atau Selesai (Cancel)"}
+	}
+
+	if err := s.requests.UpdateStatus(ctx, id, input.Status, input.Notes, toRepoActor(actor)); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			return nil, ErrNotFound
+		case errors.Is(err, repository.ErrStatusFinal):
+			return nil, ValidationErrors{"status": "Status akhir tidak dapat diubah"}
+		}
+		return nil, err
+	}
+	return s.requests.FindByID(ctx, id)
+}
+
+func (s *purchaseRequestService) UpdateNotes(ctx context.Context, id uuid.UUID, notes string, actor PRActorInput) (*models.PurchaseRequest, error) {
+	notes = strings.TrimSpace(notes)
+	if len(notes) > 4000 {
+		return nil, ValidationErrors{"internal_notes": "Catatan internal maksimal 4000 karakter"}
+	}
+	if err := s.requests.UpdateNotes(ctx, id, notes, toRepoActor(actor)); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrNotFound
 		}
@@ -245,18 +331,57 @@ func (s *purchaseRequestService) UpdateStatus(ctx context.Context, id uuid.UUID,
 	return s.requests.FindByID(ctx, id)
 }
 
-func (s *purchaseRequestService) UpdateNotes(ctx context.Context, id uuid.UUID, notes string) (*models.PurchaseRequest, error) {
-	notes = strings.TrimSpace(notes)
-	if len(notes) > 4000 {
-		return nil, ValidationErrors{"internal_notes": "Catatan internal maksimal 4000 karakter"}
+func (s *purchaseRequestService) Merge(ctx context.Context, masterID uuid.UUID, input PRMergeInput, actor PRActorInput) (*models.PurchaseRequest, error) {
+	memberIDs := uniqueIDs(input.MemberIDs)
+	if len(memberIDs) == 0 {
+		return nil, ValidationErrors{"member_ids": "Pilih minimal satu PR untuk digabungkan"}
 	}
-	if err := s.requests.UpdateNotes(ctx, id, notes); err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+	for _, memberID := range memberIDs {
+		if memberID == masterID {
+			return nil, ValidationErrors{"member_ids": "PR utama tidak boleh menjadi anggota"}
+		}
+	}
+
+	if err := s.requests.Merge(ctx, masterID, memberIDs, toRepoActor(actor)); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
 			return nil, ErrNotFound
+		case errors.Is(err, repository.ErrMergeInvalid):
+			return nil, ValidationErrors{"member_ids": strings.TrimPrefix(err.Error(), repository.ErrMergeInvalid.Error()+": ")}
 		}
 		return nil, err
 	}
-	return s.requests.FindByID(ctx, id)
+	return s.requests.FindByID(ctx, masterID)
+}
+
+func (s *purchaseRequestService) Unmerge(ctx context.Context, masterID uuid.UUID, input PRMergeInput, actor PRActorInput) (*models.PurchaseRequest, error) {
+	if err := s.requests.Unmerge(ctx, masterID, uniqueIDs(input.MemberIDs), toRepoActor(actor)); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			return nil, ErrNotFound
+		case errors.Is(err, repository.ErrMergeInvalid):
+			return nil, ValidationErrors{"member_ids": strings.TrimPrefix(err.Error(), repository.ErrMergeInvalid.Error()+": ")}
+		}
+		return nil, err
+	}
+	return s.requests.FindByID(ctx, masterID)
+}
+
+func (s *purchaseRequestService) Delete(ctx context.Context, id uuid.UUID, actor PRActorInput) error {
+	if err := s.requests.SoftDelete(ctx, id, toRepoActor(actor)); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *purchaseRequestService) AuditTrail(ctx context.Context, id uuid.UUID) ([]models.PRAuditLog, error) {
+	if _, err := s.Get(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.requests.ListAudit(ctx, id)
 }
 
 func (s *purchaseRequestService) Dashboard(ctx context.Context) (*models.DashboardData, error) {
@@ -285,6 +410,11 @@ func (s *purchaseRequestService) Dashboard(ctx context.Context) (*models.Dashboa
 		return nil, err
 	}
 
+	total, active, merged, err := s.requests.PRSummary(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	statusDist := make([]models.TypeCount, 0, len(models.PRStatuses))
 	for _, status := range models.PRStatuses {
 		statusDist = append(statusDist, models.TypeCount{Label: status, Count: statusCounts[status]})
@@ -295,13 +425,9 @@ func (s *purchaseRequestService) Dashboard(ctx context.Context) (*models.Dashboa
 			TotalDocuments: totalDocs,
 			TotalArticles:  articles,
 			TotalPDF:       pdfs,
-			TotalSubmitted: statusCounts["Submitted"],
-			TotalReview:    statusCounts["Review"],
-			TotalApproved:  statusCounts["Approved"],
-			TotalRejected:  statusCounts["Rejected"],
-			TotalOrdered:   statusCounts["Ordered"],
-			TotalReceived:  statusCounts["Received"],
-			TotalClosed:    statusCounts["Closed"],
+			TotalPR:        total,
+			TotalActive:    active,
+			TotalMerged:    merged,
 		},
 		MonthlyPR:     monthly,
 		OrderTypeDist: orderTypes,
@@ -310,17 +436,20 @@ func (s *purchaseRequestService) Dashboard(ctx context.Context) (*models.Dashboa
 	}, nil
 }
 
-func (s *purchaseRequestService) generateReference(ctx context.Context) (string, error) {
-	now := time.Now()
-	for attempt := 0; attempt < 10; attempt++ {
-		reference := fmt.Sprintf("PR-%s-%04d", now.Format("20060102"), rand.Intn(10000))
-		exists, err := s.requests.ExistsReference(ctx, reference)
-		if err != nil {
-			return "", err
+func toRepoActor(actor PRActorInput) repository.PRActor {
+	id := actor.ID
+	return repository.PRActor{ID: &id, Name: actor.Name, Role: actor.Role}
+}
+
+func uniqueIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool, len(ids))
+	result := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if id == uuid.Nil || seen[id] {
+			continue
 		}
-		if !exists {
-			return reference, nil
-		}
+		seen[id] = true
+		result = append(result, id)
 	}
-	return fmt.Sprintf("PR-%s-%s", now.Format("20060102"), uuid.NewString()[:6]), nil
+	return result
 }

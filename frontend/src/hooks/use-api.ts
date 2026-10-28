@@ -13,6 +13,7 @@ import type {
   KnowledgeQuery,
   AdminUser,
   AdminAccountInput,
+  PRAuditLog,
 } from '@/types'
 
 export const queryKeys = {
@@ -26,6 +27,7 @@ export const queryKeys = {
   purchaseRequest: (id?: string) => ['purchase-request', id] as const,
   profile: ['admin-profile'] as const,
   adminAccounts: ['admin-accounts'] as const,
+  prAudit: (id?: string) => ['pr-audit', id] as const,
 }
 
 export function useCategories(scope: 'public' | 'admin' = 'public') {
@@ -286,7 +288,7 @@ export async function createPurchaseRequest(formData: FormData): Promise<Purchas
 
 export async function trackPurchaseRequest(reference: string): Promise<PurchaseRequest> {
   const response: ApiResponse<PurchaseRequest> = await apiGet<PurchaseRequest>(
-    `/purchase-requests/status/${encodeURIComponent(reference)}`,
+    `/purchase-requests/track?reference=${encodeURIComponent(reference)}`,
   )
   return response.data as PurchaseRequest
 }
@@ -338,6 +340,66 @@ export function useDeleteAdminAccount() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.adminAccounts })
     },
+  })
+}
+
+export function useMergePurchaseRequests() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ masterId, memberIds }: { masterId: string; memberIds: string[] }) => {
+      const response = await apiPost<PurchaseRequest>(`/admin/purchase-requests/${masterId}/merge`, {
+        member_ids: memberIds,
+      })
+      return response.data as PurchaseRequest
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['purchase-request'] })
+      queryClient.invalidateQueries({ queryKey: ['pr-audit'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+export function useUnmergePurchaseRequests() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ masterId, memberIds }: { masterId: string; memberIds?: string[] }) => {
+      const response = await apiPost<PurchaseRequest>(`/admin/purchase-requests/${masterId}/unmerge`, {
+        member_ids: memberIds ?? [],
+      })
+      return response.data as PurchaseRequest
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['purchase-request'] })
+      queryClient.invalidateQueries({ queryKey: ['pr-audit'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+export function useDeletePurchaseRequest() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await apiDelete(`/admin/purchase-requests/${id}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+export function usePRAudit(id?: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.prAudit(id),
+    queryFn: async () => {
+      const response = await apiGet<PRAuditLog[]>(`/admin/purchase-requests/${id}/audit`)
+      return response.data ?? []
+    },
+    enabled: Boolean(id) && enabled,
   })
 }
 

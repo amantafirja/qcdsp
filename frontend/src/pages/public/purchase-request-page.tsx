@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useForm, Controller } from 'react-hook-form'
+import { useFieldArray, useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
@@ -13,8 +13,10 @@ import {
   Info,
   Loader2,
   Package,
+  Plus,
   Search,
   ShieldCheck,
+  Trash2,
   User,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -29,8 +31,21 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { FileUpload } from '@/components/shared/file-upload'
 import { ORDER_TYPES, ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_SPV_EXTENSIONS } from '@/lib/constants'
+import { buildPRCopyText, copyText } from '@/lib/copy-pr'
 import { formatDateTime } from '@/lib/format'
 import type { PurchaseRequest } from '@/types'
+
+const itemSchema = z.object({
+  item_name: z.string().trim().min(1, 'Nama item wajib diisi').max(255, 'Maksimal 255 karakter'),
+  brand_catalog: z.string().trim().max(255, 'Maksimal 255 karakter').optional(),
+  quantity: z
+    .number({ invalid_type_error: 'Jumlah wajib berupa angka' })
+    .int('Jumlah harus bilangan bulat')
+    .min(1, 'Jumlah minimal 1')
+    .max(1_000_000, 'Jumlah tidak wajar'),
+  unit: z.string().trim().max(50, 'Maksimal 50 karakter').optional(),
+  notes: z.string().trim().max(500, 'Maksimal 500 karakter').optional(),
+})
 
 const schema = z
   .object({
@@ -41,16 +56,6 @@ const schema = z
       .max(2000, 'Deskripsi pemesanan maksimal 2000 karakter'),
     order_type: z.string().min(1, 'Jenis pemesanan wajib dipilih'),
     custom_order_type: z.string().optional(),
-    brand_catalog: z
-      .string()
-      .trim()
-      .min(1, 'Brand (merk) dan nomor katalog wajib diisi')
-      .max(255, 'Maksimal 255 karakter'),
-    quantity: z
-      .number({ invalid_type_error: 'Jumlah wajib berupa angka' })
-      .int('Jumlah harus bilangan bulat')
-      .min(1, 'Jumlah minimal 1')
-      .max(1_000_000, 'Jumlah tidak wajar'),
     requester_name: z
       .string()
       .trim()
@@ -61,6 +66,7 @@ const schema = z
       .trim()
       .min(10, 'Alasan pemesanan minimal 10 karakter')
       .max(2000, 'Alasan pemesanan maksimal 2000 karakter'),
+    items: z.array(itemSchema).min(1, 'Minimal satu item pemesanan').max(50, 'Maksimal 50 item'),
   })
   .superRefine((values, ctx) => {
     if (values.order_type === 'Lain-Lain' && !values.custom_order_type?.trim()) {
@@ -74,9 +80,11 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>
 
+const emptyItem = { item_name: '', brand_catalog: '', quantity: 1, unit: 'unit', notes: '' }
+
 const steps = [
   { key: 'deskripsi', label: 'Deskripsi' },
-  { key: 'jenis', label: 'Jenis & Produk' },
+  { key: 'item', label: 'Item & Jenis' },
   { key: 'pemesan', label: 'Pemesan' },
   { key: 'lampiran', label: 'Lampiran' },
 ]
@@ -102,16 +110,18 @@ export function PurchaseRequestPage() {
       description: '',
       order_type: '',
       custom_order_type: '',
-      brand_catalog: '',
-      quantity: 1,
       requester_name: '',
       reason: '',
+      items: [emptyItem],
     },
   })
+
+  const { fields, append, remove } = useFieldArray({ control, name: 'items' })
 
   const orderType = watch('order_type')
   const description = watch('description')
   const reason = watch('reason')
+  const items = watch('items')
 
   const onSubmit = async (values: FormValues) => {
     const nextErrors: { spv?: string } = {}
@@ -130,17 +140,34 @@ export function PurchaseRequestPage() {
       if (values.order_type === 'Lain-Lain') {
         formData.append('custom_order_type', values.custom_order_type ?? '')
       }
-      formData.append('brand_catalog', values.brand_catalog)
-      formData.append('quantity', String(values.quantity))
       formData.append('requester_name', values.requester_name)
       formData.append('reason', values.reason)
+      formData.append(
+        'items',
+        JSON.stringify(
+          values.items.map((item) => ({
+            item_name: item.item_name,
+            brand_catalog: item.brand_catalog ?? '',
+            quantity: item.quantity,
+            unit: item.unit ?? '',
+            notes: item.notes ?? '',
+          })),
+        ),
+      )
       if (spvFile) formData.append('spv_approval', spvFile)
       if (quotationFile) formData.append('quotation', quotationFile)
 
       const created = await createPurchaseRequest(formData)
       setResult(created)
       toast.success('Purchase Request berhasil dibuat')
-      reset()
+      reset({
+        description: '',
+        order_type: '',
+        custom_order_type: '',
+        requester_name: '',
+        reason: '',
+        items: [emptyItem],
+      })
       setSpvFile(null)
       setQuotationFile(null)
       setFileErrors({})
@@ -175,28 +202,43 @@ export function PurchaseRequestPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-primary-700">
                   Nomor Referensi
                 </p>
-                <p className="mt-1.5 font-mono text-xl font-bold tracking-wide text-navy-900 sm:text-2xl">
+                <p className="mt-1.5 break-all font-mono text-xl font-bold tracking-wide text-navy-900 sm:text-2xl">
                   {result.reference_number}
                 </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(result.reference_number)
-                    toast.success('Nomor referensi disalin')
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  Salin nomor
-                </Button>
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      const ok = await copyText(result.reference_number)
+                      if (ok) toast.success('Nomor referensi disalin')
+                      else toast.error('Gagal menyalin nomor referensi')
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Salin nomor
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      const ok = await copyText(buildPRCopyText(result))
+                      if (ok) toast.success('Data PR berhasil disalin.')
+                      else toast.error('Gagal menyalin data PR')
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Salin data PR
+                  </Button>
+                </div>
               </div>
 
               <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
                 <div className="rounded-lg bg-navy-50/60 p-3">
                   <dt className="text-xs text-navy-400">Status</dt>
-                  <dd className="mt-0.5 font-semibold text-navy-900">{result.status}</dd>
+                  <dd className="mt-0.5 font-semibold text-navy-900">{result.status_label}</dd>
                 </div>
                 <div className="rounded-lg bg-navy-50/60 p-3">
                   <dt className="text-xs text-navy-400">Tanggal Pengajuan</dt>
@@ -214,6 +256,20 @@ export function PurchaseRequestPage() {
                 </div>
               </dl>
 
+              <div className="mt-4 rounded-lg border border-navy-100 p-3">
+                <p className="text-xs font-semibold text-navy-800">
+                  Item Pemesanan ({result.items.length})
+                </p>
+                <ul className="mt-2 space-y-1 text-xs text-navy-700">
+                  {result.items.map((item) => (
+                    <li key={item.id}>
+                      {item.quantity} {item.unit} · {item.item_name}
+                      {item.brand_catalog ? ` — ${item.brand_catalog}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
               <Alert variant="info" className="mt-5">
                 <Info className="h-4 w-4" />
                 <AlertTitle>Simpan nomor referensi</AlertTitle>
@@ -225,7 +281,7 @@ export function PurchaseRequestPage() {
 
               <div className="mt-6 flex flex-col gap-2 sm:flex-row">
                 <Button asChild className="flex-1">
-                  <Link to={`/tracking?ref=${result.reference_number}`}>
+                  <Link to={`/tracking?ref=${encodeURIComponent(result.reference_number)}`}>
                     <Search className="h-4 w-4" />
                     Tracking status
                   </Link>
@@ -242,6 +298,8 @@ export function PurchaseRequestPage() {
     )
   }
 
+  const totalQuantity = (items ?? []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+
   return (
     <div>
       <section className="border-b border-navy-100 bg-white">
@@ -255,7 +313,7 @@ export function PurchaseRequestPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
             Tidak perlu login. Lengkapi seluruh field wajib, unggah bukti SPV approval, lalu submit untuk
-            mendapatkan nomor referensi.
+            mendapatkan nomor referensi otomatis.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -308,91 +366,167 @@ export function PurchaseRequestPage() {
             <section className="surface-card p-5 sm:p-6">
               <SectionHeading
                 icon={<Package className="h-4 w-4" />}
-                title="B. Jenis Pemesanan & Produk"
-                description="Pilih jenis pemesanan, lalu isi brand/merk beserta nomor katalog."
+                title="B. Jenis Pemesanan & Item"
+                description="Pilih jenis pemesanan lalu tambahkan satu atau lebih item yang diajukan."
                 required
               />
 
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="order_type">
-                    Jenis Pemesanan <span className="text-destructive">*</span>
-                  </Label>
-                  <Controller
-                    control={control}
-                    name="order_type"
-                    render={({ field }) => (
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger id="order_type" aria-invalid={Boolean(errors.order_type)}>
-                          <SelectValue placeholder="Pilih jenis pemesanan" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ORDER_TYPES.map((type) => (
-                            <SelectItem key={type} value={type}>
-                              {type}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
-                  {errors.order_type && <p className="field-error">{errors.order_type.message}</p>}
-                </div>
+              <div className="mt-4 space-y-1.5">
+                <Label htmlFor="order_type">
+                  Jenis Pemesanan <span className="text-destructive">*</span>
+                </Label>
+                <Controller
+                  control={control}
+                  name="order_type"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger id="order_type" aria-invalid={Boolean(errors.order_type)}>
+                        <SelectValue placeholder="Pilih jenis pemesanan" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ORDER_TYPES.map((type) => (
+                          <SelectItem key={type} value={type}>
+                            {type}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.order_type && <p className="field-error">{errors.order_type.message}</p>}
+              </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="brand_catalog">
-                    Brand (Merk) & Nomor Katalog <span className="text-destructive">*</span>
+              {orderType === 'Lain-Lain' && (
+                <div className="mt-4 space-y-1.5">
+                  <Label htmlFor="custom_order_type">
+                    Jenis Pemesanan Lain-Lain <span className="text-destructive">*</span>
                   </Label>
                   <Input
-                    id="brand_catalog"
-                    placeholder="Contoh: MERCK 1.05XXXXXXX"
-                    maxLength={255}
-                    aria-invalid={Boolean(errors.brand_catalog)}
-                    {...register('brand_catalog')}
+                    id="custom_order_type"
+                    placeholder="Contoh: Spare Part Instrumen"
+                    maxLength={120}
+                    aria-invalid={Boolean(errors.custom_order_type)}
+                    {...register('custom_order_type')}
                   />
-                  {errors.brand_catalog ? (
-                    <p className="field-error">{errors.brand_catalog.message}</p>
-                  ) : (
-                    <p className="field-hint">Format: BRAND NOMOR_KATALOG</p>
+                  {errors.custom_order_type && (
+                    <p className="field-error">{errors.custom_order_type.message}</p>
                   )}
                 </div>
+              )}
 
-                {orderType === 'Lain-Lain' && (
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="custom_order_type">
-                      Jenis Pemesanan Lain-Lain <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      id="custom_order_type"
-                      placeholder="Contoh: Spare Part Instrumen"
-                      maxLength={120}
-                      aria-invalid={Boolean(errors.custom_order_type)}
-                      {...register('custom_order_type')}
-                    />
-                    {errors.custom_order_type && (
-                      <p className="field-error">{errors.custom_order_type.message}</p>
-                    )}
-                  </div>
+              <div className="mt-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-navy-500">
+                    Daftar Item
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => append({ ...emptyItem })}
+                    disabled={fields.length >= 50}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Tambah Item
+                  </Button>
+                </div>
+
+                {errors.items?.root?.message && <p className="field-error">{errors.items.root.message}</p>}
+                {typeof errors.items?.message === 'string' && (
+                  <p className="field-error">{errors.items.message}</p>
                 )}
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="quantity">
-                    Jumlah <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min={1}
-                    step={1}
-                    aria-invalid={Boolean(errors.quantity)}
-                    {...register('quantity', { valueAsNumber: true })}
-                  />
-                  {errors.quantity ? (
-                    <p className="field-error">{errors.quantity.message}</p>
-                  ) : (
-                    <p className="field-hint">Jumlah unit yang diajukan</p>
-                  )}
-                </div>
+                {fields.map((field, index) => (
+                  <div key={field.id} className="rounded-lg border border-navy-100 bg-navy-50/30 p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-navy-400">
+                        Item {index + 1}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => remove(index)}
+                        disabled={fields.length === 1}
+                        aria-label={`Hapus item ${index + 1}`}
+                        className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 disabled:text-navy-300"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+
+                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label htmlFor={`items.${index}.item_name`}>
+                          Nama Item <span className="text-destructive">*</span>
+                        </Label>
+                        <Input
+                          id={`items.${index}.item_name`}
+                          placeholder="Contoh: Laptop Dell Latitude 5450"
+                          maxLength={255}
+                          aria-invalid={Boolean(errors.items?.[index]?.item_name)}
+                          {...register(`items.${index}.item_name`)}
+                        />
+                        {errors.items?.[index]?.item_name && (
+                          <p className="field-error">{errors.items[index]?.item_name?.message}</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`items.${index}.brand_catalog`}>Brand / Nomor Katalog</Label>
+                        <Input
+                          id={`items.${index}.brand_catalog`}
+                          placeholder="Contoh: MERCK 1.098439.1000"
+                          maxLength={255}
+                          aria-invalid={Boolean(errors.items?.[index]?.brand_catalog)}
+                          {...register(`items.${index}.brand_catalog`)}
+                        />
+                        {errors.items?.[index]?.brand_catalog && (
+                          <p className="field-error">{errors.items[index]?.brand_catalog?.message}</p>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`items.${index}.quantity`}>
+                            Jumlah <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id={`items.${index}.quantity`}
+                            type="number"
+                            min={1}
+                            step={1}
+                            aria-invalid={Boolean(errors.items?.[index]?.quantity)}
+                            {...register(`items.${index}.quantity`, { valueAsNumber: true })}
+                          />
+                          {errors.items?.[index]?.quantity && (
+                            <p className="field-error">{errors.items[index]?.quantity?.message}</p>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`items.${index}.unit`}>Satuan</Label>
+                          <Input
+                            id={`items.${index}.unit`}
+                            placeholder="unit / box / pcs"
+                            maxLength={50}
+                            aria-invalid={Boolean(errors.items?.[index]?.unit)}
+                            {...register(`items.${index}.unit`)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label htmlFor={`items.${index}.notes`}>Catatan Item (opsional)</Label>
+                        <Input
+                          id={`items.${index}.notes`}
+                          placeholder="Spesifikasi tambahan, ukuran, atau warna"
+                          maxLength={500}
+                          {...register(`items.${index}.notes`)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
 
@@ -462,7 +596,7 @@ export function PurchaseRequestPage() {
                     setFileErrors((previous) => ({ ...previous, spv: undefined }))
                   }}
                   error={fileErrors.spv}
-                  hint="PDF, JPG, JPEG, atau PNG · maksimal 10 MB"
+                  hint="PDF, JPG, JPEG, atau PNG - maksimal 10 MB"
                 />
                 <FileUpload
                   id="quotation"
@@ -470,7 +604,7 @@ export function PurchaseRequestPage() {
                   accept={ALLOWED_DOCUMENT_EXTENSIONS}
                   value={quotationFile}
                   onChange={setQuotationFile}
-                  hint="PDF, XLSX, JPG, JPEG, atau PNG · maksimal 10 MB"
+                  hint="PDF, XLSX, JPG, JPEG, atau PNG - maksimal 10 MB"
                 />
               </div>
             </section>
@@ -483,10 +617,10 @@ export function PurchaseRequestPage() {
                 Ringkasan Pengajuan
               </h2>
               <dl className="mt-4 space-y-2.5 text-sm">
-                <SummaryRow label="Jenis" value={orderType || '—'} />
-                <SummaryRow label="Brand/Katalog" value={watch('brand_catalog') || '—'} />
-                <SummaryRow label="Jumlah" value={String(watch('quantity') || '—')} />
-                <SummaryRow label="Pemesan" value={watch('requester_name') || '—'} />
+                <SummaryRow label="Jenis" value={orderType || '-'} />
+                <SummaryRow label="Jumlah item" value={`${fields.length} item`} />
+                <SummaryRow label="Total kuantitas" value={String(totalQuantity || '-')} />
+                <SummaryRow label="Pemesan" value={watch('requester_name') || '-'} />
                 <SummaryRow label="Bukti SPV" value={spvFile ? 'Terlampir' : 'Belum ada'} />
                 <SummaryRow label="Penawaran" value={quotationFile ? 'Terlampir' : 'Tidak ada'} />
               </dl>
@@ -496,7 +630,7 @@ export function PurchaseRequestPage() {
                 {!submitting && <ArrowRight className="h-4 w-4" />}
               </Button>
               <p className="mt-2 text-center text-[11px] text-navy-400">
-                Nomor referensi akan ditampilkan setelah submit.
+                Nomor referensi dibuat otomatis oleh sistem.
               </p>
             </div>
 
@@ -506,10 +640,10 @@ export function PurchaseRequestPage() {
                 Ketentuan
               </h3>
               <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-sky-900/80">
-                <li>• Ukuran maksimal setiap file adalah 10 MB.</li>
-                <li>• Bukti SPV approval wajib dilampirkan.</li>
-                <li>• Field bertanda bintang wajib diisi.</li>
-                <li>• Simpan nomor referensi untuk tracking.</li>
+                <li>- Ukuran maksimal setiap file adalah 10 MB.</li>
+                <li>- Bukti SPV approval wajib dilampirkan.</li>
+                <li>- Field bertanda bintang wajib diisi.</li>
+                <li>- Nomor PR dibuat otomatis, tidak dapat diisi manual.</li>
               </ul>
             </div>
 

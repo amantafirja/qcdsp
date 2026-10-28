@@ -19,15 +19,10 @@ import {
   ArrowRight,
   ArrowUpRight,
   BookOpen,
-  CheckCircle2,
   ClipboardList,
   FileText,
+  GitMerge,
   Layers,
-  PackageCheck,
-  Send,
-  Truck,
-  XCircle,
-  Loader2,
 } from 'lucide-react'
 import { useDashboard } from '@/hooks/use-api'
 import { useDocumentTitle } from '@/hooks/use-document-title'
@@ -111,29 +106,33 @@ export function DashboardPage() {
     },
     {
       label: 'Total PR Masuk',
-      value:
-        (stats?.total_submitted ?? 0) +
-        (stats?.total_review ?? 0) +
-        (stats?.total_approved ?? 0) +
-        (stats?.total_rejected ?? 0) +
-        (stats?.total_ordered ?? 0) +
-        (stats?.total_received ?? 0) +
-        (stats?.total_closed ?? 0),
+      value: stats?.total_pr ?? 0,
       icon: ClipboardList,
       tone: 'bg-emerald-50 text-emerald-700',
-      hint: 'Semua status pengajuan',
+      hint: 'Seluruh PR aktif dan selesai',
+    },
+    {
+      label: 'PR Aktif',
+      value: stats?.total_active ?? 0,
+      icon: Layers,
+      tone: 'bg-sky-50 text-sky-700',
+      hint: 'PR yang masih diproses',
+    },
+    {
+      label: 'PR Digabung',
+      value: stats?.total_merged ?? 0,
+      icon: GitMerge,
+      tone: 'bg-violet-50 text-violet-700',
+      hint: 'PR anggota dari PR Utama',
     },
   ]
 
-  const prStatusCards = [
-    { label: 'Submitted', value: stats?.total_submitted ?? 0, icon: Send, color: 'text-slate-600', bg: 'bg-slate-50' },
-    { label: 'Review', value: stats?.total_review ?? 0, icon: Loader2, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: 'Approved', value: stats?.total_approved ?? 0, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: 'Rejected', value: stats?.total_rejected ?? 0, icon: XCircle, color: 'text-rose-600', bg: 'bg-rose-50' },
-    { label: 'Ordered', value: stats?.total_ordered ?? 0, icon: Truck, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Received', value: stats?.total_received ?? 0, icon: PackageCheck, color: 'text-teal-600', bg: 'bg-teal-50' },
-    { label: 'Closed', value: stats?.total_closed ?? 0, icon: ClipboardList, color: 'text-navy-600', bg: 'bg-navy-50' },
-  ]
+  const prStatusCards = (data?.status_distribution ?? []).map((item) => ({
+    status: item.label,
+    label: STATUS_META[item.label as PRStatus]?.label ?? item.label,
+    value: item.count,
+    color: STATUS_META[item.label as PRStatus]?.badge ?? 'border-navy-200 bg-navy-50 text-navy-700',
+  }))
 
   return (
     <div className="space-y-6">
@@ -160,7 +159,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {statCards.map((card) => (
           <div key={card.label} className="stat-card">
             <div className="flex items-start justify-between">
@@ -183,15 +182,15 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {prStatusCards.map((card) => (
           <Link
-            key={card.label}
-            to={`/admin/purchase-requests?status=${card.label}`}
+            key={card.status}
+            to={`/admin/purchase-requests?status=${card.status}`}
             className="group flex items-center gap-2.5 rounded-lg border border-border bg-white p-3 transition-all hover:border-primary-200 hover:shadow-card"
           >
-            <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md', card.bg, card.color)}>
-              <card.icon className="h-4 w-4" />
+            <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md border', card.color)}>
+              <ClipboardList className="h-4 w-4" />
             </span>
             <div className="min-w-0">
               <p className="truncate text-[11px] font-medium text-navy-400">{card.label}</p>

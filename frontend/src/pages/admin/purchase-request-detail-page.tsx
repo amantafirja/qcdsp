@@ -1,23 +1,38 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Calendar,
   Check,
+  Copy,
   Download,
   ExternalLink,
   FileText,
+  GitMerge,
   History,
+  Layers,
   Loader2,
   Mail,
   Package,
   Save,
   Send,
+  ShieldAlert,
   StickyNote,
+  Trash2,
+  Unlink,
   User,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { usePurchaseRequestDetail, useUpdatePRNotes, useUpdatePRStatus } from '@/hooks/use-api'
+import {
+  useDeletePurchaseRequest,
+  useMergePurchaseRequests,
+  usePRAudit,
+  usePurchaseRequestDetail,
+  usePurchaseRequests,
+  useUnmergePurchaseRequests,
+  useUpdatePRNotes,
+  useUpdatePRStatus,
+} from '@/hooks/use-api'
 import { useAuth } from '@/contexts/auth-context'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { canManagePurchaseRequest } from '@/lib/permissions'
@@ -29,7 +44,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog,
@@ -39,10 +54,38 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { PR_STATUSES, STATUS_META, type PRStatus } from '@/lib/constants'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  PR_STATUSES,
+  STATUS_META,
+  isTerminalStatus,
+  statusLabel,
+  type PRStatus,
+} from '@/lib/constants'
+import { buildPRCopyText, copyText } from '@/lib/copy-pr'
 import { formatDateTime, formatFileSize } from '@/lib/format'
 import { downloadProtectedFile, openProtectedFile } from '@/lib/api'
 import { cn } from '@/lib/utils'
+
+const AUDIT_LABELS: Record<string, string> = {
+  created: 'Purchase Request dibuat',
+  status_changed: 'Perubahan progress',
+  merged: 'Penggabungan PR',
+  merged_into: 'PR digabungkan ke PR lain',
+  unmerge: 'Pembatalan penggabungan',
+  unmerged: 'PR dikeluarkan dari PR Utama',
+  deleted: 'Purchase Request dihapus',
+  notes_updated: 'Catatan internal diubah',
+}
 
 export function PurchaseRequestDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -51,12 +94,34 @@ export function PurchaseRequestDetailPage() {
   const { data: pr, isLoading, isError, refetch } = usePurchaseRequestDetail(id)
   const updateStatusMutation = useUpdatePRStatus()
   const updateNotesMutation = useUpdatePRNotes()
+  const mergeMutation = useMergePurchaseRequests()
+  const unmergeMutation = useUnmergePurchaseRequests()
+  const deleteMutation = useDeletePurchaseRequest()
+
   const canEdit = canManagePurchaseRequest(admin?.role)
 
   const [statusDialogOpen, setStatusDialogOpen] = useState(false)
   const [nextStatus, setNextStatus] = useState<string>('')
   const [statusNotes, setStatusNotes] = useState('')
   const [internalNotes, setInternalNotes] = useState('')
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false)
+  const [memberIds, setMemberIds] = useState<string[]>([])
+  const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const { data: auditLogs, isLoading: auditLoading } = usePRAudit(id, canEdit)
+
+  const mergeCandidatesQuery = usePurchaseRequests({ page: 1, page_size: 100 }, mergeDialogOpen)
+  const mergeCandidates = useMemo(
+    () =>
+      (mergeCandidatesQuery.data?.requests ?? []).filter(
+        (item) =>
+          item.id !== pr?.id &&
+          !item.is_merged &&
+          !item.is_master &&
+          !isTerminalStatus(item.status),
+      ),
+    [mergeCandidatesQuery.data, pr?.id],
+  )
 
   useDocumentTitle(pr ? `PR ${pr.reference_number}` : 'Detail Purchase Request')
 
@@ -93,8 +158,16 @@ export function PurchaseRequestDetailPage() {
   }
 
   const statusMeta = STATUS_META[pr.status as PRStatus]
+  const terminal = isTerminalStatus(pr.status)
   const spv = (pr.attachments ?? []).find((item) => item.attachment_type === 'spv_approval')
   const quotation = (pr.attachments ?? []).find((item) => item.attachment_type === 'quotation')
+  const canBecomeMaster = canEdit && !pr.is_merged && !pr.is_master && !terminal
+
+  const handleCopy = async () => {
+    const ok = await copyText(buildPRCopyText(pr))
+    if (ok) toast.success('Data PR berhasil disalin.')
+    else toast.error('Gagal menyalin data PR')
+  }
 
   const handleStatusUpdate = async () => {
     if (!nextStatus) {
@@ -103,7 +176,7 @@ export function PurchaseRequestDetailPage() {
     }
     try {
       await updateStatusMutation.mutateAsync({ id: pr.id, status: nextStatus, notes: statusNotes })
-      toast.success('Status Purchase Request berhasil diperbarui')
+      toast.success('Progress Purchase Request berhasil diperbarui')
       setStatusDialogOpen(false)
       setStatusNotes('')
     } catch (error) {
@@ -120,9 +193,46 @@ export function PurchaseRequestDetailPage() {
     }
   }
 
+  const handleMerge = async () => {
+    if (memberIds.length === 0) {
+      toast.error('Pilih minimal satu PR untuk digabungkan')
+      return
+    }
+    try {
+      await mergeMutation.mutateAsync({ masterId: pr.id, memberIds })
+      toast.success('Purchase Request berhasil digabungkan')
+      setMergeDialogOpen(false)
+      setMemberIds([])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal menggabungkan PR')
+    }
+  }
+
+  const handleUnmerge = async (memberId?: string) => {
+    try {
+      await unmergeMutation.mutateAsync({
+        masterId: pr.id,
+        memberIds: memberId ? [memberId] : undefined,
+      })
+      toast.success('Penggabungan Purchase Request dibatalkan')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal membatalkan penggabungan')
+    }
+  }
+
+  const handleDelete = async () => {
+    try {
+      await deleteMutation.mutateAsync(pr.id)
+      toast.success('Purchase Request berhasil dihapus')
+      navigate('/admin/purchase-requests', { replace: true })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal menghapus PR')
+    }
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
         <div>
           <Button asChild variant="ghost" size="sm" className="-ml-2 mb-1">
             <Link to="/admin/purchase-requests">
@@ -131,28 +241,46 @@ export function PurchaseRequestDetailPage() {
             </Link>
           </Button>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-mono text-lg font-bold tracking-tight text-navy-900 sm:text-xl">
+            <h2 className="break-all font-mono text-lg font-bold tracking-tight text-navy-900 sm:text-xl">
               {pr.reference_number}
             </h2>
             <StatusBadge status={pr.status} />
+            {pr.is_master && <Badge variant="default">PR Utama</Badge>}
+            {pr.is_merged && <Badge variant="info">PR Anggota</Badge>}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
             Diajukan {formatDateTime(pr.created_at)} · Diperbarui {formatDateTime(pr.updated_at)}
           </p>
         </div>
 
-        <div className="flex gap-2">
-          {canEdit && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void handleCopy()}>
+            <Copy className="h-4 w-4" />
+            Salin Data PR
+          </Button>
+          {canEdit && !terminal && (
             <Button
               variant="outline"
               onClick={() => {
-                setNextStatus('')
+                setNextStatus(pr.status)
                 setStatusNotes('')
                 setStatusDialogOpen(true)
               }}
             >
               <Send className="h-4 w-4" />
-              Ubah Status
+              Ubah Progress
+            </Button>
+          )}
+          {canBecomeMaster && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setMemberIds([])
+                setMergeDialogOpen(true)
+              }}
+            >
+              <GitMerge className="h-4 w-4" />
+              Gabungkan
             </Button>
           )}
           {spv && (
@@ -167,15 +295,50 @@ export function PurchaseRequestDetailPage() {
               Unduh Lampiran
             </Button>
           )}
+          {canEdit && (
+            <Button variant="ghost" onClick={() => setDeleteOpen(true)} className="text-rose-600 hover:bg-rose-50">
+              <Trash2 className="h-4 w-4" />
+              Hapus
+            </Button>
+          )}
         </div>
       </div>
 
+      {(pr.is_merged || pr.is_master) && (
+        <Alert variant="info">
+          <Layers className="h-4 w-4" />
+          <AlertTitle>Status Penggabungan</AlertTitle>
+          <AlertDescription>
+            {pr.is_merged && pr.master ? (
+              <span>
+                PR ini adalah <strong>PR Asal</strong> yang tergabung ke PR Utama{' '}
+                <Link
+                  to={`/admin/purchase-requests/${pr.master.id}`}
+                  className="font-mono font-semibold underline"
+                >
+                  {pr.master.reference_number}
+                </Link>
+                . Item PR ini tetap tampil pada PR Utama.
+              </span>
+            ) : (
+              <span>
+                PR ini adalah <strong>PR Utama</strong> dengan {pr.members.length} PR asal:{' '}
+                <span className="font-mono">
+                  {pr.members.map((member) => member.reference_number).join(', ')}
+                </span>
+                .
+              </span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="rounded-xl border border-navy-100 bg-white p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-navy-400">Status saat ini</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-navy-400">Progress saat ini</p>
         <div className="mt-1.5 flex items-start gap-2.5">
           <span className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', statusMeta?.dot ?? 'bg-navy-300')} />
           <div>
-            <p className="text-sm font-semibold text-navy-900">{pr.status}</p>
+            <p className="text-sm font-semibold text-navy-900">{statusLabel(pr.status)}</p>
             <p className="text-xs text-muted-foreground">{statusMeta?.description}</p>
           </div>
         </div>
@@ -193,17 +356,15 @@ export function PurchaseRequestDetailPage() {
               <InfoField label="Pemesan" value={pr.requester_name} icon={<User className="h-3.5 w-3.5" />} />
               <InfoField
                 label="Jenis Pemesanan"
-                value={pr.order_type === 'Lain-Lain' ? `Lain-Lain — ${pr.custom_order_type ?? ''}` : pr.order_type}
+                value={pr.order_type === 'Lain-Lain' ? `Lain-Lain - ${pr.custom_order_type ?? ''}` : pr.order_type}
                 icon={<Package className="h-3.5 w-3.5" />}
               />
-              <InfoField label="Brand / Nomor Katalog" value={pr.brand_catalog} />
-              <InfoField label="Jumlah" value={String(pr.quantity)} />
               <InfoField
                 label="Tanggal Pengajuan"
                 value={formatDateTime(pr.created_at)}
                 icon={<Calendar className="h-3.5 w-3.5" />}
               />
-              <InfoField label="Status" value={pr.status} />
+              <InfoField label="Jumlah Item" value={`${pr.items.length} item`} />
             </dl>
 
             <Separator className="my-4" />
@@ -221,16 +382,126 @@ export function PurchaseRequestDetailPage() {
           </section>
 
           <section className="surface-card p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                <Package className="h-4 w-4 text-navy-400" />
+                Daftar Item ({pr.items.length})
+              </h3>
+            </div>
+            <div className="mt-3 overflow-x-auto rounded-lg border border-navy-100">
+              <table className="w-full min-w-[560px] text-left text-xs">
+                <thead className="bg-navy-50/60 text-[11px] uppercase tracking-wide text-navy-500">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Item</th>
+                    <th className="px-3 py-2 font-semibold">Brand / Katalog</th>
+                    <th className="px-3 py-2 text-right font-semibold">Qty</th>
+                    <th className="px-3 py-2 font-semibold">Asal PR</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-navy-100">
+                  {pr.items.map((item) => (
+                    <tr key={item.id}>
+                      <td className="px-3 py-2 font-medium text-navy-900">
+                        {item.item_name}
+                        {item.notes && <span className="block text-[11px] text-navy-400">{item.notes}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-navy-600">{item.brand_catalog || '-'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-navy-800">
+                        {item.quantity} {item.unit}
+                      </td>
+                      <td className="px-3 py-2">
+                        {item.origin_is_master ? (
+                          <span className="font-mono text-[10px] text-navy-600">{item.origin_reference}</span>
+                        ) : (
+                          <Link
+                            to={`/admin/purchase-requests/${item.origin_pr_id}`}
+                            className="font-mono text-[10px] font-semibold text-primary-700 hover:underline"
+                          >
+                            {item.origin_reference}
+                          </Link>
+                        )}
+                        {!item.origin_is_master && (
+                          <Badge variant="info" className="ml-1.5">
+                            Gabungan
+                          </Badge>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {pr.is_master && (
+            <section className="surface-card p-5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                  <Layers className="h-4 w-4 text-navy-400" />
+                  PR Asal yang Digabungkan ({pr.members.length})
+                </h3>
+                {canEdit && pr.members.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleUnmerge()}
+                    loading={unmergeMutation.isPending}
+                  >
+                    <Unlink className="h-3.5 w-3.5" />
+                    Batalkan semua
+                  </Button>
+                )}
+              </div>
+              <div className="mt-3 space-y-2">
+                {pr.members.length === 0 && (
+                  <p className="text-xs text-muted-foreground">Belum ada PR yang digabungkan.</p>
+                )}
+                {pr.members.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-navy-100 bg-navy-50/40 p-3"
+                  >
+                    <div className="min-w-0">
+                      <Link
+                        to={`/admin/purchase-requests/${member.id}`}
+                        className="font-mono text-[11px] font-semibold text-primary-700 hover:underline"
+                      >
+                        {member.reference_number}
+                      </Link>
+                      <p className="text-xs text-navy-600">
+                        {member.requester_name} · {member.item_count ?? 0} item
+                      </p>
+                      <p className="text-[10px] text-navy-400">
+                        Digabungkan {member.merged_at ? formatDateTime(member.merged_at) : '-'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={member.status} />
+                      {canEdit && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void handleUnmerge(member.id)}
+                          loading={unmergeMutation.isPending}
+                        >
+                          <Unlink className="h-3.5 w-3.5" />
+                          Keluarkan
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="surface-card p-5">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
               <Download className="h-4 w-4 text-navy-400" />
               Lampiran
             </h3>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <AttachmentCard
-                title="Bukti SPV Approval"
-                required
-                attachment={spv}
-              />
+              <AttachmentCard title="Bukti SPV Approval" required attachment={spv} />
               <AttachmentCard title="Penawaran" attachment={quotation} />
             </div>
           </section>
@@ -246,33 +517,86 @@ export function PurchaseRequestDetailPage() {
                   Catatan ini hanya terlihat oleh admin, tidak ditampilkan ke user.
                 </p>
               </div>
-              <Button
-                size="sm"
-                onClick={() => void handleSaveNotes()}
-                loading={updateNotesMutation.isPending}
-                disabled={internalNotes === (pr.internal_notes ?? '')}
-              >
-                {!updateNotesMutation.isPending && <Save className="h-3.5 w-3.5" />}
-                Simpan
-              </Button>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  onClick={() => void handleSaveNotes()}
+                  loading={updateNotesMutation.isPending}
+                  disabled={internalNotes === (pr.internal_notes ?? '')}
+                >
+                  {!updateNotesMutation.isPending && <Save className="h-3.5 w-3.5" />}
+                  Simpan
+                </Button>
+              )}
             </div>
-            <Textarea
-              value={internalNotes}
-              onChange={(event) => setInternalNotes(event.target.value)}
-              placeholder="Tambahkan catatan proses pengadaan, nomor PO, atau informasi vendor..."
-              rows={5}
-              maxLength={4000}
-              className="mt-3"
-            />
-            <p className="mt-1 text-right text-[11px] text-navy-400">{internalNotes.length}/4000</p>
+            {canEdit ? (
+              <>
+                <Textarea
+                  value={internalNotes}
+                  onChange={(event) => setInternalNotes(event.target.value)}
+                  placeholder="Tambahkan catatan proses pengadaan, nomor PO, atau informasi vendor..."
+                  rows={5}
+                  maxLength={4000}
+                  className="mt-3"
+                />
+                <p className="mt-1 text-right text-[11px] text-navy-400">{internalNotes.length}/4000</p>
+              </>
+            ) : (
+              <p className="mt-3 whitespace-pre-wrap rounded-lg bg-navy-50/60 p-3 text-sm leading-relaxed text-navy-800">
+                {pr.internal_notes || 'Belum ada catatan internal.'}
+              </p>
+            )}
           </section>
+
+          {canEdit && (
+            <section className="surface-card p-5">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                <ShieldAlert className="h-4 w-4 text-navy-400" />
+                Audit Trail
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Riwayat aktivitas PR beserta data sebelum dan sesudah perubahan.
+              </p>
+              <div className="mt-3 space-y-2">
+                {auditLoading && <p className="text-xs text-muted-foreground">Memuat audit trail...</p>}
+                {!auditLoading && (auditLogs ?? []).length === 0 && (
+                  <p className="text-xs text-muted-foreground">Belum ada aktivitas tercatat.</p>
+                )}
+                {(auditLogs ?? []).map((entry) => (
+                  <div key={entry.id} className="rounded-lg border border-navy-100 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-1">
+                      <p className="text-xs font-semibold text-navy-900">
+                        {AUDIT_LABELS[entry.action] ?? entry.action}
+                      </p>
+                      <p className="text-[10px] text-navy-400">{formatDateTime(entry.created_at)}</p>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-navy-500">
+                      oleh {entry.actor_name || 'Sistem'}
+                      {entry.actor_role ? ` (${entry.actor_role})` : ''}
+                    </p>
+                    {entry.notes && <p className="mt-1 text-[11px] text-navy-600">{entry.notes}</p>}
+                    {Boolean(entry.before_data || entry.after_data) && (
+                      <details className="mt-1.5">
+                        <summary className="cursor-pointer text-[10px] font-medium text-primary-700">
+                          Lihat data sebelum / sesudah
+                        </summary>
+                        <pre className="mt-1 max-h-40 overflow-auto rounded bg-navy-50 p-2 text-[10px] leading-relaxed text-navy-700">
+{JSON.stringify({ before: entry.before_data, after: entry.after_data }, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
 
         <aside className="space-y-5">
           <section className="surface-card p-5">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
               <History className="h-4 w-4 text-navy-400" />
-              Riwayat Status
+              Riwayat Progress
             </h3>
             <div className="mt-4 space-y-0">
               {(pr.status_history ?? []).length === 0 && (
@@ -294,7 +618,7 @@ export function PurchaseRequestDetailPage() {
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-1">
-                        <p className="text-xs font-semibold text-navy-900">{entry.status}</p>
+                        <p className="text-xs font-semibold text-navy-900">{statusLabel(entry.status)}</p>
                         <p className="text-[10px] text-navy-400">{formatDateTime(entry.created_at)}</p>
                       </div>
                       {entry.notes && (
@@ -309,11 +633,13 @@ export function PurchaseRequestDetailPage() {
             </div>
           </section>
 
-          {canEdit && (
+          {canEdit && !terminal && (
             <section className="surface-card p-5">
-              <h3 className="text-sm font-semibold text-navy-900">Ubah Status Cepat</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">Pilih status baru untuk pengajuan ini.</p>
-              <div className="mt-3 grid grid-cols-2 gap-1.5">
+              <h3 className="text-sm font-semibold text-navy-900">Ubah Progress Cepat</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Progress hanya dapat diubah manual oleh admin.
+              </p>
+              <div className="mt-3 space-y-1.5">
                 {PR_STATUSES.map((status) => (
                   <button
                     key={status}
@@ -324,14 +650,14 @@ export function PurchaseRequestDetailPage() {
                     }}
                     disabled={status === pr.status}
                     className={cn(
-                      'flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors',
+                      'flex w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-left text-[11px] font-medium transition-colors',
                       status === pr.status
                         ? 'cursor-default border-primary-200 bg-primary-50 text-primary-800'
                         : 'border-navy-200 bg-white text-navy-600 hover:border-primary-300 hover:bg-navy-50',
                     )}
                   >
                     <span className={cn('h-1.5 w-1.5 rounded-full', STATUS_META[status].dot)} />
-                    {status}
+                    {STATUS_META[status].label}
                     {status === pr.status && <Check className="ml-auto h-3 w-3" />}
                   </button>
                 ))}
@@ -339,78 +665,167 @@ export function PurchaseRequestDetailPage() {
             </section>
           )}
 
-          <Alert variant="info">
-            <Mail className="h-4 w-4" />
-            <AlertDescription>
-              Status <strong>Rejected</strong> menandakan pengajuan ditolak. Sertakan alasan pada catatan
-              status agar pemesan memahami tindak lanjutnya.
-            </AlertDescription>
-          </Alert>
+          {terminal && (
+            <Alert variant="info">
+              <Mail className="h-4 w-4" />
+              <AlertDescription>
+                PR berstatus akhir (<strong>{statusLabel(pr.status)}</strong>) dan tidak dapat diubah lagi.
+                Nomor PR tetap tersimpan sebagai histori.
+              </AlertDescription>
+            </Alert>
+          )}
         </aside>
       </div>
 
-      {canEdit && (
-        <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Ubah Status Purchase Request</DialogTitle>
-              <DialogDescription>
-                Status saat ini: <strong>{pr.status}</strong>. Perubahan akan tercatat pada riwayat.
-              </DialogDescription>
-            </DialogHeader>
+      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ubah Progress Purchase Request</DialogTitle>
+            <DialogDescription>
+              Progress saat ini: <strong>{statusLabel(pr.status)}</strong>. Perubahan akan tercatat pada
+              riwayat dan audit trail.
+            </DialogDescription>
+          </DialogHeader>
 
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Status Baru</Label>
-                <Select value={nextStatus} onValueChange={setNextStatus}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PR_STATUSES.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {status}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="status-notes">Catatan Status (opsional)</Label>
-                <Textarea
-                  id="status-notes"
-                  value={statusNotes}
-                  onChange={(event) => setStatusNotes(event.target.value)}
-                  placeholder="Contoh: PO dikirim ke vendor, estimasi tiba 5 hari kerja."
-                  rows={3}
-                  maxLength={2000}
-                />
-                <p className="field-hint">Catatan akan tampil pada riwayat status.</p>
-              </div>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Progress Baru</Label>
+              <Select value={nextStatus} onValueChange={setNextStatus}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih progress" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PR_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {STATUS_META[status].label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
-                Batal
-              </Button>
-              <Button
-                onClick={() => void handleStatusUpdate()}
-                loading={updateStatusMutation.isPending}
-                disabled={!nextStatus || nextStatus === pr.status}
+            <div className="space-y-1.5">
+              <Label htmlFor="status-notes">Catatan (opsional)</Label>
+              <Textarea
+                id="status-notes"
+                value={statusNotes}
+                onChange={(event) => setStatusNotes(event.target.value)}
+                placeholder="Contoh: PO dikirim ke vendor, estimasi tiba 5 hari kerja."
+                rows={3}
+                maxLength={2000}
+              />
+              <p className="field-hint">
+                Wajib diisi untuk status Selesai (Reject) dan Selesai (Cancel).
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
+              Batal
+            </Button>
+            <Button
+              onClick={() => void handleStatusUpdate()}
+              loading={updateStatusMutation.isPending}
+              disabled={!nextStatus || nextStatus === pr.status}
+            >
+              Simpan Progress
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Gabungkan PR ke {pr.reference_number}</DialogTitle>
+            <DialogDescription>
+              PR ini menjadi PR Utama. Item dari PR yang dipilih akan tampil pada PR ini, dan PR asal tetap
+              tersimpan sebagai histori.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-72 space-y-1.5 overflow-y-auto rounded-lg border border-navy-100 p-2">
+            {mergeCandidatesQuery.isLoading && <p className="p-2 text-xs text-muted-foreground">Memuat...</p>}
+            {!mergeCandidatesQuery.isLoading && mergeCandidates.length === 0 && (
+              <p className="p-2 text-xs text-muted-foreground">
+                Tidak ada PR yang dapat digabungkan saat ini.
+              </p>
+            )}
+            {mergeCandidates.map((candidate) => (
+              <label
+                key={candidate.id}
+                className="flex cursor-pointer items-start gap-2 rounded-md p-2 hover:bg-navy-50"
               >
-                Simpan Status
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-navy-300 text-primary-600"
+                  checked={memberIds.includes(candidate.id)}
+                  onChange={() =>
+                    setMemberIds((current) =>
+                      current.includes(candidate.id)
+                        ? current.filter((id) => id !== candidate.id)
+                        : [...current, candidate.id],
+                    )
+                  }
+                />
+                <span className="min-w-0">
+                  <span className="block font-mono text-[11px] font-semibold text-navy-800">
+                    {candidate.reference_number}
+                  </span>
+                  <span className="block truncate text-xs text-navy-600">
+                    {candidate.items.map((item) => item.item_name).join(', ') || candidate.description}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMergeDialogOpen(false)}>
+              Batal
+            </Button>
+            <Button
+              onClick={() => void handleMerge()}
+              loading={mergeMutation.isPending}
+              disabled={memberIds.length === 0}
+            >
+              Gabungkan {memberIds.length > 0 ? `(${memberIds.length})` : ''}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Purchase Request?</AlertDialogTitle>
+            <AlertDialogDescription>
+              PR <span className="font-mono font-semibold">{pr.reference_number}</span> akan dihapus secara
+              soft delete. Nomor PR tidak digunakan kembali dan histori tetap tersimpan pada audit trail.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault()
+                void handleDelete()
+              }}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? 'Menghapus...' : 'Hapus'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {updateStatusMutation.isPending && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-950/30 backdrop-blur-sm">
           <div className="flex items-center gap-3 rounded-lg bg-white px-5 py-3.5 shadow-elevated">
             <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
-            <p className="text-sm font-medium text-navy-800">Memperbarui status...</p>
+            <p className="text-sm font-medium text-navy-800">Memperbarui progress...</p>
           </div>
         </div>
       )}

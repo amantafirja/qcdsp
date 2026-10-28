@@ -93,7 +93,7 @@ export function GatewayPage() {
                 <p className="mt-0.5 text-xs text-navy-300">Kategori konten</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-white">7</p>
+                <p className="text-2xl font-bold text-white">9</p>
                 <p className="mt-0.5 text-xs text-navy-300">Tahap status PR</p>
               </div>
             </div>

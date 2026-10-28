@@ -45,6 +45,8 @@ func New(handlers Handlers, tokens *utils.TokenManager, admins middleware.AdminL
 		public.GET("/knowledge/:id/pdf", handlers.File.ServeKnowledgePDF)
 
 		public.POST("/purchase-requests", handlers.PurchaseRequest.Create)
+		public.GET("/purchase-requests/track", handlers.PurchaseRequest.TrackByQuery)
+		public.GET("/purchase-requests/track/attachments/:attachmentId", handlers.PurchaseRequest.DownloadPublicAttachmentByQuery)
 		public.GET("/purchase-requests/status/:id", handlers.PurchaseRequest.Track)
 		public.GET("/purchase-requests/status/:id/attachments/:attachmentId", handlers.PurchaseRequest.DownloadPublicAttachment)
 
@@ -86,6 +88,10 @@ func New(handlers Handlers, tokens *utils.TokenManager, admins middleware.AdminL
 
 				staff.PUT("/purchase-requests/:id/status", handlers.PurchaseRequest.UpdateStatus)
 				staff.PUT("/purchase-requests/:id", handlers.PurchaseRequest.Update)
+				staff.POST("/purchase-requests/:id/merge", handlers.PurchaseRequest.Merge)
+				staff.POST("/purchase-requests/:id/unmerge", handlers.PurchaseRequest.Unmerge)
+				staff.DELETE("/purchase-requests/:id", handlers.PurchaseRequest.Delete)
+				staff.GET("/purchase-requests/:id/audit", handlers.PurchaseRequest.AuditTrail)
 			}
 
 			owner := protected.Group("")

@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +15,17 @@ import (
 
 	"github.com/google/uuid"
 )
+
+var (
+	ErrStatusFinal  = errors.New("status akhir tidak dapat diubah")
+	ErrMergeInvalid = errors.New("penggabungan tidak valid")
+)
+
+type PRActor struct {
+	ID   *uuid.UUID
+	Name string
+	Role string
+}
 
 type PRFilter struct {
 	Search    string
@@ -26,18 +39,21 @@ type PRFilter struct {
 }
 
 type PurchaseRequestRepository interface {
-	CreateWithAttachments(ctx context.Context, pr *models.PurchaseRequest, attachments []models.Attachment) error
+	Create(ctx context.Context, pr *models.PurchaseRequest, items []models.PurchaseRequestItem, attachments []models.Attachment, actor PRActor) error
 	List(ctx context.Context, filter PRFilter) ([]models.PurchaseRequest, int, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.PurchaseRequest, error)
 	FindByReference(ctx context.Context, reference string) (*models.PurchaseRequest, error)
-	UpdateStatus(ctx context.Context, id uuid.UUID, status, notes string, adminID *uuid.UUID) error
-	UpdateNotes(ctx context.Context, id uuid.UUID, notes string) error
-	ExistsReference(ctx context.Context, reference string) (bool, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status, notes string, actor PRActor) error
+	UpdateNotes(ctx context.Context, id uuid.UUID, notes string, actor PRActor) error
+	Merge(ctx context.Context, masterID uuid.UUID, memberIDs []uuid.UUID, actor PRActor) error
+	Unmerge(ctx context.Context, masterID uuid.UUID, memberIDs []uuid.UUID, actor PRActor) error
+	SoftDelete(ctx context.Context, id uuid.UUID, actor PRActor) error
+	ListAudit(ctx context.Context, id uuid.UUID) ([]models.PRAuditLog, error)
 	CountByStatus(ctx context.Context) (map[string]int, error)
 	MonthlyCounts(ctx context.Context, months int) ([]models.MonthlyCount, error)
 	OrderTypeCounts(ctx context.Context) ([]models.TypeCount, error)
 	Recent(ctx context.Context, limit int) ([]models.PurchaseRequest, error)
-	Total(ctx context.Context) (int, error)
+	PRSummary(ctx context.Context) (total, active, merged int, err error)
 }
 
 type purchaseRequestRepository struct {
@@ -48,24 +64,56 @@ func NewPurchaseRequestRepository(db *sql.DB) PurchaseRequestRepository {
 	return &purchaseRequestRepository{db: db}
 }
 
-func (r *purchaseRequestRepository) CreateWithAttachments(ctx context.Context, pr *models.PurchaseRequest, attachments []models.Attachment) error {
+const prSelectColumns = `
+	p.id, p.reference_number, p.description, p.order_type, p.custom_order_type,
+	p.requester_name, p.reason, p.status, p.internal_notes,
+	p.master_pr_id, p.merged_at, p.deleted_at, p.created_at, p.updated_at,
+	(SELECT mp.reference_number FROM purchase_requests mp WHERE mp.id = p.master_pr_id) AS master_reference,
+	(SELECT COUNT(*) FROM purchase_requests c WHERE c.master_pr_id = p.id AND c.deleted_at IS NULL) AS member_count`
+
+const prFrom = ` FROM purchase_requests p`
+
+func (r *purchaseRequestRepository) Create(ctx context.Context, pr *models.PurchaseRequest, items []models.PurchaseRequestItem, attachments []models.Attachment, actor PRActor) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	query := `
+	reference, err := nextReference(ctx, tx)
+	if err != nil {
+		return err
+	}
+	pr.ReferenceNumber = reference
+	pr.Status = models.PRStatusFormCreated
+
+	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO purchase_requests (
-			id, reference_number, description, order_type, custom_order_type, brand_catalog,
-			quantity, requester_name, reason, status, internal_notes
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		RETURNING created_at, updated_at`
-	if err := tx.QueryRowContext(ctx, query,
+			id, reference_number, description, order_type, custom_order_type,
+			requester_name, reason, status, internal_notes
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING created_at, updated_at`,
 		pr.ID, pr.ReferenceNumber, pr.Description, pr.OrderType, pr.CustomOrderType,
-		pr.BrandCatalog, pr.Quantity, pr.RequesterName, pr.Reason, pr.Status, pr.InternalNotes,
+		pr.RequesterName, pr.Reason, pr.Status, pr.InternalNotes,
 	).Scan(&pr.CreatedAt, &pr.UpdatedAt); err != nil {
 		return mapPgError(err)
+	}
+
+	for i := range items {
+		items[i].ID = uuid.New()
+		items[i].PurchaseRequestID = pr.ID
+		items[i].OriginPRID = pr.ID
+		items[i].OriginReference = pr.ReferenceNumber
+		items[i].OriginIsMaster = true
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO purchase_request_items (
+				id, purchase_request_id, item_name, brand_catalog, quantity, unit, notes, sort_order, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			items[i].ID, items[i].PurchaseRequestID, items[i].ItemName, items[i].BrandCatalog,
+			items[i].Quantity, items[i].Unit, items[i].Notes, i+1, pr.CreatedAt,
+		); err != nil {
+			return err
+		}
 	}
 
 	for i := range attachments {
@@ -85,51 +133,82 @@ func (r *purchaseRequestRepository) CreateWithAttachments(ctx context.Context, p
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO purchase_request_status_history (id, purchase_request_id, status, notes)
-		VALUES ($1, $2, $3, $4)`,
-		uuid.New(), pr.ID, pr.Status, "Purchase Request dibuat",
+		INSERT INTO purchase_request_status_history (id, purchase_request_id, status, notes, created_at)
+		VALUES ($1, $2, $3, $4, $5)`,
+		uuid.New(), pr.ID, pr.Status, "Purchase Request dibuat", pr.CreatedAt,
 	); err != nil {
+		return err
+	}
+
+	after := map[string]interface{}{
+		"reference_number": pr.ReferenceNumber,
+		"status":           pr.Status,
+		"order_type":       pr.OrderType,
+		"requester_name":   pr.RequesterName,
+		"items":            items,
+	}
+	if err := insertAudit(ctx, tx, pr.ID, "created", actor, "Purchase Request dibuat", nil, after); err != nil {
 		return err
 	}
 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	pr.Items = items
 	pr.Attachments = attachments
+	pr.StatusLabel = models.StatusLabel(pr.Status)
+	pr.Members = []models.PRReference{}
 	return nil
 }
 
+func nextReference(ctx context.Context, tx *sql.Tx) (string, error) {
+	var period string
+	var sequence int
+	err := tx.QueryRowContext(ctx, `
+		INSERT INTO pr_number_counters (period, last_number)
+		SELECT TO_CHAR(NOW(), 'MMYY'), 1
+		ON CONFLICT (period) DO UPDATE
+		SET last_number = pr_number_counters.last_number + 1,
+		    updated_at = NOW()
+		RETURNING period, last_number`).Scan(&period, &sequence)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("PRG/1GQ01/%s/%05d", period, sequence), nil
+}
+
 func (r *purchaseRequestRepository) List(ctx context.Context, filter PRFilter) ([]models.PurchaseRequest, int, error) {
-	conditions := []string{"1 = 1"}
+	conditions := []string{"p.deleted_at IS NULL"}
 	args := []interface{}{}
 	argIndex := 1
 
 	if filter.Search != "" {
 		search := "%" + strings.ToLower(strings.TrimSpace(filter.Search)) + "%"
 		conditions = append(conditions, fmt.Sprintf(
-			"(LOWER(reference_number) LIKE $%d OR LOWER(requester_name) LIKE $%d OR LOWER(description) LIKE $%d OR LOWER(brand_catalog) LIKE $%d)",
+			`(LOWER(p.reference_number) LIKE $%d OR LOWER(p.requester_name) LIKE $%d OR LOWER(p.description) LIKE $%d
+			  OR EXISTS (SELECT 1 FROM purchase_request_items i WHERE i.purchase_request_id = p.id AND LOWER(i.item_name) LIKE $%d))`,
 			argIndex, argIndex, argIndex, argIndex,
 		))
 		args = append(args, search)
 		argIndex++
 	}
 	if filter.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("status = $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("p.status = $%d", argIndex))
 		args = append(args, filter.Status)
 		argIndex++
 	}
 	if filter.OrderType != "" {
-		conditions = append(conditions, fmt.Sprintf("order_type = $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("p.order_type = $%d", argIndex))
 		args = append(args, filter.OrderType)
 		argIndex++
 	}
 	if filter.DateFrom != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("p.created_at >= $%d", argIndex))
 		args = append(args, *filter.DateFrom)
 		argIndex++
 	}
 	if filter.DateTo != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at <= $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("p.created_at <= $%d", argIndex))
 		args = append(args, *filter.DateTo)
 		argIndex++
 	}
@@ -137,16 +216,16 @@ func (r *purchaseRequestRepository) List(ctx context.Context, filter PRFilter) (
 	where := " WHERE " + strings.Join(conditions, " AND ")
 
 	var total int
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM purchase_requests"+where, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*)"+prFrom+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
-	orderBy := "created_at DESC"
+	orderBy := "p.created_at DESC"
 	switch filter.Sort {
 	case "oldest":
-		orderBy = "created_at ASC"
+		orderBy = "p.created_at ASC"
 	case "status":
-		orderBy = "status ASC, created_at DESC"
+		orderBy = "p.status ASC, p.created_at DESC"
 	}
 
 	page := filter.Page
@@ -162,7 +241,8 @@ func (r *purchaseRequestRepository) List(ctx context.Context, filter PRFilter) (
 	}
 	offset := (page - 1) * pageSize
 
-	query := prSelect + where + " ORDER BY " + orderBy + fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	query := "SELECT" + prSelectColumns + prFrom + where + " ORDER BY " + orderBy +
+		fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
 	args = append(args, pageSize, offset)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -174,7 +254,7 @@ func (r *purchaseRequestRepository) List(ctx context.Context, filter PRFilter) (
 	requests := make([]models.PurchaseRequest, 0)
 	ids := make([]uuid.UUID, 0)
 	for rows.Next() {
-		pr, err := scanPR(rows)
+		pr, err := scanPRRow(rows)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -190,10 +270,18 @@ func (r *purchaseRequestRepository) List(ctx context.Context, filter PRFilter) (
 		if err != nil {
 			return nil, 0, err
 		}
+		items, err := r.itemsForRequests(ctx, ids)
+		if err != nil {
+			return nil, 0, err
+		}
 		for i := range requests {
 			requests[i].Attachments = attachments[requests[i].ID]
 			if requests[i].Attachments == nil {
 				requests[i].Attachments = []models.Attachment{}
+			}
+			requests[i].Items = items[requests[i].ID]
+			if requests[i].Items == nil {
+				requests[i].Items = []models.PurchaseRequestItem{}
 			}
 		}
 	}
@@ -201,13 +289,8 @@ func (r *purchaseRequestRepository) List(ctx context.Context, filter PRFilter) (
 	return requests, total, nil
 }
 
-const prSelect = `
-	SELECT id, reference_number, description, order_type, custom_order_type, brand_catalog,
-	       quantity, requester_name, reason, status, internal_notes, created_at, updated_at
-	FROM purchase_requests`
-
 func (r *purchaseRequestRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.PurchaseRequest, error) {
-	row := r.db.QueryRowContext(ctx, prSelect+" WHERE id = $1", id)
+	row := r.db.QueryRowContext(ctx, "SELECT"+prSelectColumns+prFrom+" WHERE p.id = $1 AND p.deleted_at IS NULL", id)
 	pr, err := scanPRRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -222,7 +305,9 @@ func (r *purchaseRequestRepository) FindByID(ctx context.Context, id uuid.UUID) 
 }
 
 func (r *purchaseRequestRepository) FindByReference(ctx context.Context, reference string) (*models.PurchaseRequest, error) {
-	row := r.db.QueryRowContext(ctx, prSelect+" WHERE UPPER(reference_number) = UPPER($1)", strings.TrimSpace(reference))
+	row := r.db.QueryRowContext(ctx,
+		"SELECT"+prSelectColumns+prFrom+" WHERE UPPER(p.reference_number) = UPPER($1) AND p.deleted_at IS NULL",
+		strings.TrimSpace(reference))
 	pr, err := scanPRRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -246,14 +331,55 @@ func (r *purchaseRequestRepository) hydrate(ctx context.Context, pr *models.Purc
 		pr.Attachments = []models.Attachment{}
 	}
 
+	items, err := r.itemsForRequests(ctx, []uuid.UUID{pr.ID})
+	if err != nil {
+		return err
+	}
+	pr.Items = items[pr.ID]
+	if pr.Items == nil {
+		pr.Items = []models.PurchaseRequestItem{}
+	}
+
+	history, err := r.historyFor(ctx, pr.ID)
+	if err != nil {
+		return err
+	}
+	pr.StatusHistory = history
+
+	if pr.IsMerged {
+		var master models.PRReference
+		err := r.db.QueryRowContext(ctx, `
+			SELECT mp.id, mp.reference_number, mp.status
+			FROM purchase_requests mp
+			WHERE mp.id = (SELECT master_pr_id FROM purchase_requests WHERE id = $1)`, pr.ID).
+			Scan(&master.ID, &master.ReferenceNumber, &master.Status)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			pr.Master = &master
+		}
+	}
+
+	members, err := r.membersFor(ctx, pr.ID)
+	if err != nil {
+		return err
+	}
+	pr.Members = members
+	pr.IsMaster = len(members) > 0
+
+	return nil
+}
+
+func (r *purchaseRequestRepository) historyFor(ctx context.Context, prID uuid.UUID) ([]models.StatusHistoryEntry, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT h.id, h.status, h.notes, h.changed_by, a.name, h.created_at
 		FROM purchase_request_status_history h
 		LEFT JOIN admin_users a ON a.id = h.changed_by
 		WHERE h.purchase_request_id = $1
-		ORDER BY h.created_at ASC`, pr.ID)
+		ORDER BY h.created_at ASC`, prID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -261,12 +387,35 @@ func (r *purchaseRequestRepository) hydrate(ctx context.Context, pr *models.Purc
 	for rows.Next() {
 		var entry models.StatusHistoryEntry
 		if err := rows.Scan(&entry.ID, &entry.Status, &entry.Notes, &entry.ChangedBy, &entry.AdminName, &entry.CreatedAt); err != nil {
-			return err
+			return nil, err
 		}
 		history = append(history, entry)
 	}
-	pr.StatusHistory = history
-	return rows.Err()
+	return history, rows.Err()
+}
+
+func (r *purchaseRequestRepository) membersFor(ctx context.Context, masterID uuid.UUID) ([]models.PRReference, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT c.id, c.reference_number, c.status, c.requester_name, c.merged_at,
+		       (SELECT COUNT(*) FROM purchase_request_items i WHERE i.purchase_request_id = c.id)
+		FROM purchase_requests c
+		WHERE c.master_pr_id = $1 AND c.deleted_at IS NULL
+		ORDER BY c.merged_at ASC NULLS LAST, c.created_at ASC`, masterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := make([]models.PRReference, 0)
+	for rows.Next() {
+		var member models.PRReference
+		if err := rows.Scan(&member.ID, &member.ReferenceNumber, &member.Status,
+			&member.RequesterName, &member.MergedAt, &member.ItemCount); err != nil {
+			return nil, err
+		}
+		members = append(members, member)
+	}
+	return members, rows.Err()
 }
 
 func (r *purchaseRequestRepository) attachmentsForRequests(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]models.Attachment, error) {
@@ -310,23 +459,98 @@ func (r *purchaseRequestRepository) attachmentsForRequests(ctx context.Context, 
 	return result, rows.Err()
 }
 
-func (r *purchaseRequestRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status, notes string, adminID *uuid.UUID) error {
+// itemsForRequests mengembalikan item milik PR itu sendiri ditambah item dari PR anggota
+// ketika ID yang diminta adalah Master PR. Origin item selalu PR asal.
+func (r *purchaseRequestRepository) itemsForRequests(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]models.PurchaseRequestItem, error) {
+	result := make(map[uuid.UUID][]models.PurchaseRequestItem)
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	direct := make(map[uuid.UUID]bool, len(ids))
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+		direct[id] = true
+	}
+
+	query := fmt.Sprintf(`
+		SELECT i.id, i.purchase_request_id, i.item_name, i.brand_catalog, i.quantity, i.unit,
+		       i.notes, i.created_at, o.reference_number, o.master_pr_id
+		FROM purchase_request_items i
+		JOIN purchase_requests o ON o.id = i.purchase_request_id
+		WHERE i.purchase_request_id IN (%s)
+		   OR o.master_pr_id IN (%s)
+		ORDER BY i.created_at ASC, i.sort_order ASC, i.item_name ASC`,
+		strings.Join(placeholders, ", "), strings.Join(placeholders, ", "))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item models.PurchaseRequestItem
+		var ownerMaster *uuid.UUID
+		if err := rows.Scan(
+			&item.ID, &item.PurchaseRequestID, &item.ItemName, &item.BrandCatalog,
+			&item.Quantity, &item.Unit, &item.Notes, &item.CreatedAt,
+			&item.OriginReference, &ownerMaster,
+		); err != nil {
+			return nil, err
+		}
+		item.OriginPRID = item.PurchaseRequestID
+
+		if direct[item.PurchaseRequestID] {
+			item.OriginIsMaster = true
+			result[item.PurchaseRequestID] = append(result[item.PurchaseRequestID], item)
+			continue
+		}
+		if ownerMaster != nil && direct[*ownerMaster] {
+			item.OriginIsMaster = false
+			result[*ownerMaster] = append(result[*ownerMaster], item)
+		}
+	}
+
+	for key := range result {
+		items := result[key]
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].OriginIsMaster != items[j].OriginIsMaster {
+				return items[i].OriginIsMaster
+			}
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		})
+		result[key] = items
+	}
+	return result, rows.Err()
+}
+
+func (r *purchaseRequestRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status, notes string, actor PRActor) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, "UPDATE purchase_requests SET status = $2, updated_at = NOW() WHERE id = $1", id, status)
-	if err != nil {
+	var current string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT status FROM purchase_requests WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", id).
+		Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
+	if models.IsTerminalStatus(current) {
+		return ErrStatusFinal
 	}
-	if affected == 0 {
-		return ErrNotFound
+
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE purchase_requests SET status = $2, updated_at = NOW() WHERE id = $1", id, status); err != nil {
+		return err
 	}
 
 	var note interface{}
@@ -335,37 +559,295 @@ func (r *purchaseRequestRepository) UpdateStatus(ctx context.Context, id uuid.UU
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO purchase_request_status_history (id, purchase_request_id, status, notes, changed_by)
-		VALUES ($1, $2, $3, $4, $5)`, uuid.New(), id, status, note, adminID,
+		VALUES ($1, $2, $3, $4, $5)`, uuid.New(), id, status, note, actor.ID,
 	); err != nil {
+		return err
+	}
+
+	if err := insertAudit(ctx, tx, id, "status_changed", actor, strings.TrimSpace(notes),
+		map[string]interface{}{"status": current},
+		map[string]interface{}{"status": status}); err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
 
-func (r *purchaseRequestRepository) UpdateNotes(ctx context.Context, id uuid.UUID, notes string) error {
+func (r *purchaseRequestRepository) UpdateNotes(ctx context.Context, id uuid.UUID, notes string, actor PRActor) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var previous *string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT internal_notes FROM purchase_requests WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", id).
+		Scan(&previous); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
 	var note interface{}
 	if strings.TrimSpace(notes) != "" {
 		note = strings.TrimSpace(notes)
 	}
-	result, err := r.db.ExecContext(ctx, "UPDATE purchase_requests SET internal_notes = $2, updated_at = NOW() WHERE id = $1", id, note)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE purchase_requests SET internal_notes = $2, updated_at = NOW() WHERE id = $1", id, note); err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
+
+	if err := insertAudit(ctx, tx, id, "notes_updated", actor, "",
+		map[string]interface{}{"internal_notes": previous},
+		map[string]interface{}{"internal_notes": note}); err != nil {
 		return err
 	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
+
+	return tx.Commit()
 }
 
-func (r *purchaseRequestRepository) ExistsReference(ctx context.Context, reference string) (bool, error) {
-	var exists bool
-	err := r.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM purchase_requests WHERE reference_number = $1)", reference).Scan(&exists)
-	return exists, err
+func (r *purchaseRequestRepository) Merge(ctx context.Context, masterID uuid.UUID, memberIDs []uuid.UUID, actor PRActor) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var masterStatus string
+	var masterDeleted *time.Time
+	var masterParent *uuid.UUID
+	if err := tx.QueryRowContext(ctx,
+		"SELECT status, deleted_at, master_pr_id FROM purchase_requests WHERE id = $1 FOR UPDATE", masterID).
+		Scan(&masterStatus, &masterDeleted, &masterParent); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if masterDeleted != nil {
+		return fmt.Errorf("%w: PR utama sudah dihapus", ErrMergeInvalid)
+	}
+	if masterParent != nil {
+		return fmt.Errorf("%w: PR utama sudah menjadi anggota PR lain", ErrMergeInvalid)
+	}
+	if models.IsTerminalStatus(masterStatus) {
+		return fmt.Errorf("%w: PR utama sudah berstatus akhir", ErrMergeInvalid)
+	}
+
+	type mergedMember struct {
+		ID        uuid.UUID
+		Reference string
+		Status    string
+	}
+
+	merged := make([]mergedMember, 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		if memberID == masterID {
+			return fmt.Errorf("%w: PR utama tidak boleh menjadi anggota", ErrMergeInvalid)
+		}
+
+		var status string
+		var deletedAt *time.Time
+		var parent *uuid.UUID
+		if err := tx.QueryRowContext(ctx,
+			"SELECT status, deleted_at, master_pr_id FROM purchase_requests WHERE id = $1 FOR UPDATE", memberID).
+			Scan(&status, &deletedAt, &parent); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: PR anggota tidak ditemukan", ErrMergeInvalid)
+			}
+			return err
+		}
+		if deletedAt != nil {
+			return fmt.Errorf("%w: PR anggota sudah dihapus", ErrMergeInvalid)
+		}
+		if parent != nil {
+			return fmt.Errorf("%w: PR anggota sudah tergabung pada PR lain", ErrMergeInvalid)
+		}
+		if models.IsTerminalStatus(status) {
+			return fmt.Errorf("%w: PR anggota sudah berstatus akhir", ErrMergeInvalid)
+		}
+
+		var hasMembers bool
+		if err := tx.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM purchase_requests WHERE master_pr_id = $1 AND deleted_at IS NULL)", memberID).
+			Scan(&hasMembers); err != nil {
+			return err
+		}
+		if hasMembers {
+			return fmt.Errorf("%w: PR yang sudah menjadi master tidak dapat digabungkan", ErrMergeInvalid)
+		}
+
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE purchase_requests SET master_pr_id = $2, merged_at = NOW(), merged_by = $3, updated_at = NOW() WHERE id = $1",
+			memberID, masterID, actor.ID); err != nil {
+			return err
+		}
+
+		if err := insertAudit(ctx, tx, memberID, "merged_into", actor, "",
+			map[string]interface{}{"master_pr_id": nil},
+			map[string]interface{}{"master_pr_id": masterID}); err != nil {
+			return err
+		}
+
+		var reference string
+		if err := tx.QueryRowContext(ctx,
+			"SELECT reference_number FROM purchase_requests WHERE id = $1", memberID).Scan(&reference); err != nil {
+			return err
+		}
+		merged = append(merged, mergedMember{ID: memberID, Reference: reference, Status: status})
+	}
+
+	if err := insertAudit(ctx, tx, masterID, "merged", actor, "",
+		map[string]interface{}{"members": []string{}},
+		map[string]interface{}{"members": merged}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *purchaseRequestRepository) Unmerge(ctx context.Context, masterID uuid.UUID, memberIDs []uuid.UUID, actor PRActor) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var masterReference string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT reference_number FROM purchase_requests WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", masterID).
+		Scan(&masterReference); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	targets := memberIDs
+	if len(targets) == 0 {
+		rows, err := tx.QueryContext(ctx,
+			"SELECT id FROM purchase_requests WHERE master_pr_id = $1 AND deleted_at IS NULL", masterID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id uuid.UUID
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			targets = append(targets, id)
+		}
+		rows.Close()
+	}
+
+	released := make([]uuid.UUID, 0, len(targets))
+	for _, memberID := range targets {
+		var parent *uuid.UUID
+		if err := tx.QueryRowContext(ctx,
+			"SELECT master_pr_id FROM purchase_requests WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", memberID).
+			Scan(&parent); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: PR anggota tidak ditemukan", ErrMergeInvalid)
+			}
+			return err
+		}
+		if parent == nil || *parent != masterID {
+			return fmt.Errorf("%w: PR bukan anggota dari PR utama ini", ErrMergeInvalid)
+		}
+
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE purchase_requests
+			SET master_pr_id = NULL, merged_at = NULL, merged_by = NULL, updated_at = NOW()
+			WHERE id = $1`, memberID); err != nil {
+			return err
+		}
+
+		if err := insertAudit(ctx, tx, memberID, "unmerged", actor, "",
+			map[string]interface{}{"master_pr_id": masterID},
+			map[string]interface{}{"master_pr_id": nil}); err != nil {
+			return err
+		}
+		released = append(released, memberID)
+	}
+
+	if err := insertAudit(ctx, tx, masterID, "unmerge", actor, "",
+		map[string]interface{}{"members": released},
+		map[string]interface{}{"members": []string{}}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *purchaseRequestRepository) SoftDelete(ctx context.Context, id uuid.UUID, actor PRActor) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var reference string
+	var status string
+	var deletedAt *time.Time
+	if err := tx.QueryRowContext(ctx,
+		"SELECT reference_number, status, deleted_at FROM purchase_requests WHERE id = $1 FOR UPDATE", id).
+		Scan(&reference, &status, &deletedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if deletedAt != nil {
+		return ErrNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE purchase_requests SET deleted_at = NOW(), deleted_by = $2, updated_at = NOW() WHERE id = $1",
+		id, actor.ID); err != nil {
+		return err
+	}
+
+	if err := insertAudit(ctx, tx, id, "deleted", actor, "Purchase Request dihapus (soft delete)",
+		map[string]interface{}{"reference_number": reference, "status": status, "deleted_at": nil},
+		map[string]interface{}{"reference_number": reference, "status": status, "deleted_at": time.Now()}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *purchaseRequestRepository) ListAudit(ctx context.Context, id uuid.UUID) ([]models.PRAuditLog, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, action, actor_id, actor_name, actor_role, notes, before_data, after_data, created_at
+		FROM purchase_request_audit_logs
+		WHERE purchase_request_id = $1
+		ORDER BY created_at DESC
+		LIMIT 200`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	logs := make([]models.PRAuditLog, 0)
+	for rows.Next() {
+		var entry models.PRAuditLog
+		var before, after []byte
+		if err := rows.Scan(&entry.ID, &entry.Action, &entry.ActorID, &entry.ActorName,
+			&entry.ActorRole, &entry.Notes, &before, &after, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		if len(before) > 0 {
+			entry.BeforeData = json.RawMessage(before)
+		}
+		if len(after) > 0 {
+			entry.AfterData = json.RawMessage(after)
+		}
+		logs = append(logs, entry)
+	}
+	return logs, rows.Err()
 }
 
 func (r *purchaseRequestRepository) CountByStatus(ctx context.Context) (map[string]int, error) {
@@ -373,7 +855,8 @@ func (r *purchaseRequestRepository) CountByStatus(ctx context.Context) (map[stri
 	for _, status := range models.PRStatuses {
 		result[status] = 0
 	}
-	rows, err := r.db.QueryContext(ctx, "SELECT status, COUNT(*) FROM purchase_requests GROUP BY status")
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT status, COUNT(*) FROM purchase_requests WHERE deleted_at IS NULL GROUP BY status")
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +885,8 @@ func (r *purchaseRequestRepository) MonthlyCounts(ctx context.Context, months in
 		LEFT JOIN (
 			SELECT DATE_TRUNC('month', created_at) AS month, COUNT(*) AS count
 			FROM purchase_requests
-			WHERE created_at >= DATE_TRUNC('month', NOW()) - (($1::int - 1) * INTERVAL '1 month')
+			WHERE deleted_at IS NULL
+			  AND created_at >= DATE_TRUNC('month', NOW()) - (($1::int - 1) * INTERVAL '1 month')
 			GROUP BY DATE_TRUNC('month', created_at)
 		) p ON p.month = m.month
 		ORDER BY m.month ASC`, months)
@@ -424,7 +908,9 @@ func (r *purchaseRequestRepository) MonthlyCounts(ctx context.Context, months in
 
 func (r *purchaseRequestRepository) OrderTypeCounts(ctx context.Context) ([]models.TypeCount, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT order_type, COUNT(*) FROM purchase_requests GROUP BY order_type ORDER BY COUNT(*) DESC`)
+		SELECT order_type, COUNT(*) FROM purchase_requests
+		WHERE deleted_at IS NULL
+		GROUP BY order_type ORDER BY COUNT(*) DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -442,42 +928,112 @@ func (r *purchaseRequestRepository) OrderTypeCounts(ctx context.Context) ([]mode
 }
 
 func (r *purchaseRequestRepository) Recent(ctx context.Context, limit int) ([]models.PurchaseRequest, error) {
-	rows, err := r.db.QueryContext(ctx, prSelect+" ORDER BY created_at DESC LIMIT $1", limit)
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT"+prSelectColumns+prFrom+" WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT $1", limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	results := make([]models.PurchaseRequest, 0)
+	ids := make([]uuid.UUID, 0)
 	for rows.Next() {
-		pr, err := scanPR(rows)
+		pr, err := scanPRRow(rows)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, *pr)
+		ids = append(ids, pr.ID)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(ids) > 0 {
+		items, err := r.itemsForRequests(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for i := range results {
+			results[i].Items = items[results[i].ID]
+			if results[i].Items == nil {
+				results[i].Items = []models.PurchaseRequestItem{}
+			}
+		}
+	}
+	return results, nil
 }
 
-func (r *purchaseRequestRepository) Total(ctx context.Context) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM purchase_requests").Scan(&count)
-	return count, err
-}
-
-func scanPR(rows *sql.Rows) (*models.PurchaseRequest, error) {
-	return scanPRRow(rows)
+func (r *purchaseRequestRepository) PRSummary(ctx context.Context) (int, int, int, error) {
+	var total, active, merged int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COUNT(*) FILTER (WHERE status NOT IN ('done', 'rejected', 'cancelled')),
+		       COUNT(*) FILTER (WHERE master_pr_id IS NOT NULL)
+		FROM purchase_requests
+		WHERE deleted_at IS NULL`).Scan(&total, &active, &merged)
+	return total, active, merged, err
 }
 
 func scanPRRow(row rowScanner) (*models.PurchaseRequest, error) {
 	var pr models.PurchaseRequest
+	var masterID *uuid.UUID
+	var masterRef sql.NullString
+	var memberCount int
 	err := row.Scan(
 		&pr.ID, &pr.ReferenceNumber, &pr.Description, &pr.OrderType, &pr.CustomOrderType,
-		&pr.BrandCatalog, &pr.Quantity, &pr.RequesterName, &pr.Reason, &pr.Status,
-		&pr.InternalNotes, &pr.CreatedAt, &pr.UpdatedAt,
+		&pr.RequesterName, &pr.Reason, &pr.Status, &pr.InternalNotes,
+		&masterID, &pr.MergedAt, &pr.DeletedAt, &pr.CreatedAt, &pr.UpdatedAt,
+		&masterRef, &memberCount,
 	)
 	if err != nil {
 		return nil, err
 	}
+	pr.StatusLabel = models.StatusLabel(pr.Status)
+	pr.IsMerged = masterID != nil
+	pr.IsMaster = memberCount > 0
+	pr.Members = []models.PRReference{}
+	if masterID != nil {
+		pr.Master = &models.PRReference{ID: *masterID}
+		if masterRef.Valid {
+			pr.Master.ReferenceNumber = masterRef.String
+		}
+	}
 	return &pr, nil
+}
+
+func insertAudit(ctx context.Context, tx *sql.Tx, prID uuid.UUID, action string, actor PRActor, notes string, before, after interface{}) error {
+	var beforeJSON, afterJSON []byte
+	var err error
+	if before != nil {
+		beforeJSON, err = json.Marshal(before)
+		if err != nil {
+			return err
+		}
+	}
+	if after != nil {
+		afterJSON, err = json.Marshal(after)
+		if err != nil {
+			return err
+		}
+	}
+
+	var note interface{}
+	if strings.TrimSpace(notes) != "" {
+		note = strings.TrimSpace(notes)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO purchase_request_audit_logs (
+			purchase_request_id, action, actor_id, actor_name, actor_role, notes, before_data, after_data
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		prID, action, actor.ID, actor.Name, actor.Role, note, nullableJSON(beforeJSON), nullableJSON(afterJSON))
+	return err
+}
+
+func nullableJSON(value []byte) interface{} {
+	if len(value) == 0 {
+		return nil
+	}
+	return value
 }

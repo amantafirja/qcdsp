@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,22 +54,51 @@ type KnowledgeDocument struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+type PurchaseRequestItem struct {
+	ID                uuid.UUID `json:"id"`
+	PurchaseRequestID uuid.UUID `json:"purchase_request_id"`
+	ItemName          string    `json:"item_name"`
+	BrandCatalog      string    `json:"brand_catalog"`
+	Quantity          int       `json:"quantity"`
+	Unit              string    `json:"unit"`
+	Notes             *string   `json:"notes"`
+	OriginPRID        uuid.UUID `json:"origin_pr_id"`
+	OriginReference   string    `json:"origin_reference"`
+	OriginIsMaster    bool      `json:"origin_is_master"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type PRReference struct {
+	ID              uuid.UUID `json:"id"`
+	ReferenceNumber string    `json:"reference_number"`
+	Status          string    `json:"status"`
+	RequesterName   string    `json:"requester_name,omitempty"`
+	ItemCount       int       `json:"item_count,omitempty"`
+	MergedAt        *time.Time `json:"merged_at,omitempty"`
+}
+
 type PurchaseRequest struct {
-	ID               uuid.UUID              `json:"id"`
-	ReferenceNumber  string                 `json:"reference_number"`
-	Description      string                 `json:"description"`
-	OrderType        string                 `json:"order_type"`
-	CustomOrderType  *string                `json:"custom_order_type"`
-	BrandCatalog     string                 `json:"brand_catalog"`
-	Quantity         int                    `json:"quantity"`
-	RequesterName    string                 `json:"requester_name"`
-	Reason           string                 `json:"reason"`
-	Status           string                 `json:"status"`
-	InternalNotes    *string                `json:"internal_notes"`
-	Attachments      []Attachment           `json:"attachments,omitempty"`
-	StatusHistory    []StatusHistoryEntry   `json:"status_history,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ID              uuid.UUID             `json:"id"`
+	ReferenceNumber string                `json:"reference_number"`
+	Description     string                `json:"description"`
+	OrderType       string                `json:"order_type"`
+	CustomOrderType *string               `json:"custom_order_type"`
+	RequesterName   string                `json:"requester_name"`
+	Reason          string                `json:"reason"`
+	Status          string                `json:"status"`
+	StatusLabel     string                `json:"status_label"`
+	InternalNotes   *string               `json:"internal_notes"`
+	Items           []PurchaseRequestItem `json:"items"`
+	Attachments     []Attachment          `json:"attachments"`
+	StatusHistory   []StatusHistoryEntry  `json:"status_history,omitempty"`
+	Master          *PRReference          `json:"master,omitempty"`
+	Members         []PRReference         `json:"members"`
+	IsMaster        bool                  `json:"is_master"`
+	IsMerged        bool                  `json:"is_merged"`
+	MergedAt        *time.Time            `json:"merged_at"`
+	DeletedAt       *time.Time            `json:"deleted_at"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
 }
 
 type Attachment struct {
@@ -92,18 +122,26 @@ type StatusHistoryEntry struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+type PRAuditLog struct {
+	ID              uuid.UUID       `json:"id"`
+	Action          string          `json:"action"`
+	ActorID         *uuid.UUID      `json:"actor_id"`
+	ActorName       string          `json:"actor_name"`
+	ActorRole       string          `json:"actor_role"`
+	Notes           *string         `json:"notes"`
+	BeforeData      json.RawMessage `json:"before_data"`
+	AfterData       json.RawMessage `json:"after_data"`
+	CreatedAt       time.Time       `json:"created_at"`
+}
+
 type DashboardStats struct {
 	TotalDocuments int `json:"total_documents"`
 	TotalArticles  int `json:"total_articles"`
 	TotalPDF       int `json:"total_pdf"`
 
-	TotalSubmitted int `json:"total_submitted"`
-	TotalReview    int `json:"total_review"`
-	TotalApproved  int `json:"total_approved"`
-	TotalRejected  int `json:"total_rejected"`
-	TotalOrdered   int `json:"total_ordered"`
-	TotalReceived  int `json:"total_received"`
-	TotalClosed    int `json:"total_closed"`
+	TotalPR     int `json:"total_pr"`
+	TotalActive int `json:"total_active"`
+	TotalMerged int `json:"total_merged"`
 }
 
 type MonthlyCount struct {
@@ -117,9 +155,9 @@ type TypeCount struct {
 }
 
 type DashboardData struct {
-	Stats          DashboardStats `json:"stats"`
-	MonthlyPR      []MonthlyCount `json:"monthly_pr"`
-	OrderTypeDist  []TypeCount    `json:"order_type_distribution"`
-	StatusDist     []TypeCount    `json:"status_distribution"`
-	RecentPR       []PurchaseRequest `json:"recent_purchase_requests"`
+	Stats         DashboardStats     `json:"stats"`
+	MonthlyPR     []MonthlyCount     `json:"monthly_pr"`
+	OrderTypeDist []TypeCount        `json:"order_type_distribution"`
+	StatusDist    []TypeCount        `json:"status_distribution"`
+	RecentPR      []PurchaseRequest  `json:"recent_purchase_requests"`
 }

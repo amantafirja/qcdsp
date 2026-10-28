@@ -220,7 +220,8 @@ func writeApprovalPDF(uploadDir, reference, requester string) (string, string, i
 		return "", "", 0, err
 	}
 
-	storedName := fmt.Sprintf("spv-approval-%s.pdf", reference)
+	safeReference := strings.NewReplacer("/", "-", "\\", "-", " ", "-").Replace(reference)
+	storedName := fmt.Sprintf("spv-approval-%s.pdf", safeReference)
 	absolute := filepath.Join(absoluteDir, storedName)
 
 	data := buildPDF(pdfDocument{

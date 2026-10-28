@@ -26,6 +26,55 @@ func CanManageContent(role string) bool {
 	return role == RoleSuperAdmin || role == RoleAdmin
 }
 
+const (
+	PRStatusFormCreated = "form_created"
+	PRStatusOPPenawaran = "op_penawaran"
+	PRStatusOPProposal  = "op_proposal"
+	PRStatusOPManager   = "op_manager"
+	PRStatusPendingPO   = "pending_po"
+	PRStatusPOApprove   = "po_approve"
+	PRStatusDone        = "done"
+	PRStatusRejected    = "rejected"
+	PRStatusCancelled   = "cancelled"
+)
+
+// PRStatuses adalah urutan progress Purchase Request.
+var PRStatuses = []string{
+	PRStatusFormCreated,
+	PRStatusOPPenawaran,
+	PRStatusOPProposal,
+	PRStatusOPManager,
+	PRStatusPendingPO,
+	PRStatusPOApprove,
+	PRStatusDone,
+	PRStatusRejected,
+	PRStatusCancelled,
+}
+
+var PRStatusLabels = map[string]string{
+	PRStatusFormCreated: "Form Dibuat",
+	PRStatusOPPenawaran: "OP Penawaran Purchasing",
+	PRStatusOPProposal:  "OP Proposal",
+	PRStatusOPManager:   "OP Manager",
+	PRStatusPendingPO:   "Pending PO",
+	PRStatusPOApprove:   "PO Approve",
+	PRStatusDone:        "Selesai (Done)",
+	PRStatusRejected:    "Selesai (Reject)",
+	PRStatusCancelled:   "Selesai (Cancel)",
+}
+
+// PRStatusFlow adalah status non-final sesuai urutan progress.
+var PRStatusFlow = []string{
+	PRStatusFormCreated,
+	PRStatusOPPenawaran,
+	PRStatusOPProposal,
+	PRStatusOPManager,
+	PRStatusPendingPO,
+	PRStatusPOApprove,
+}
+
+var PRTerminalStatuses = []string{PRStatusDone, PRStatusRejected, PRStatusCancelled}
+
 var OrderTypes = []string{
 	"Reagen",
 	"Tools",
@@ -36,16 +85,6 @@ var OrderTypes = []string{
 	"Gas",
 	"Analisa External",
 	"Lain-Lain",
-}
-
-var PRStatuses = []string{
-	"Submitted",
-	"Review",
-	"Approved",
-	"Rejected",
-	"Ordered",
-	"Received",
-	"Closed",
 }
 
 func IsValidOrderType(value string) bool {
@@ -64,6 +103,22 @@ func IsValidStatus(value string) bool {
 		}
 	}
 	return false
+}
+
+func IsTerminalStatus(value string) bool {
+	for _, item := range PRTerminalStatuses {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func StatusLabel(value string) string {
+	if label, ok := PRStatusLabels[value]; ok {
+		return label
+	}
+	return value
 }
 
 func IsValidContentType(value string) bool {

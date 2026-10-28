@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict LH8l45fJxiUWVbhrAa1DgEmWV8RWNqcyl9H8zAWz1ZHL5OTKm5WX0tlYjBt47Id
+\restrict 4AdY92CjcGi4uCCflagx59iEkeufbPnqqhtgSYX2atm8WfbqAmcXAVktjWMikQM
 
 -- Dumped from database version 18.6
 -- Dumped by pg_dump version 18.6
@@ -131,6 +131,53 @@ CREATE TABLE public.knowledge_documents (
 
 
 --
+-- Name: pr_number_counters; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pr_number_counters (
+    period character(4) NOT NULL,
+    last_number integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: purchase_request_audit_logs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.purchase_request_audit_logs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    purchase_request_id uuid NOT NULL,
+    action character varying(40) NOT NULL,
+    actor_id uuid,
+    actor_name character varying(150) DEFAULT ''::character varying NOT NULL,
+    actor_role character varying(30) DEFAULT 'user'::character varying NOT NULL,
+    notes text,
+    before_data jsonb,
+    after_data jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: purchase_request_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.purchase_request_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    purchase_request_id uuid NOT NULL,
+    item_name character varying(255) NOT NULL,
+    brand_catalog character varying(255) DEFAULT ''::character varying NOT NULL,
+    quantity integer DEFAULT 1 NOT NULL,
+    unit character varying(50) DEFAULT 'unit'::character varying NOT NULL,
+    notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    CONSTRAINT purchase_request_items_quantity_check CHECK ((quantity > 0))
+);
+
+
+--
 -- Name: purchase_request_status_history; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -141,7 +188,7 @@ CREATE TABLE public.purchase_request_status_history (
     notes text,
     changed_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT purchase_request_status_history_status_check CHECK (((status)::text = ANY (ARRAY[('Submitted'::character varying)::text, ('Review'::character varying)::text, ('Approved'::character varying)::text, ('Rejected'::character varying)::text, ('Ordered'::character varying)::text, ('Received'::character varying)::text, ('Closed'::character varying)::text])))
+    CONSTRAINT purchase_request_status_history_status_check CHECK (((status)::text = ANY ((ARRAY['form_created'::character varying, 'op_penawaran'::character varying, 'op_proposal'::character varying, 'op_manager'::character varying, 'pending_po'::character varying, 'po_approve'::character varying, 'done'::character varying, 'rejected'::character varying, 'cancelled'::character varying])::text[])))
 );
 
 
@@ -155,18 +202,20 @@ CREATE TABLE public.purchase_requests (
     description text NOT NULL,
     order_type character varying(50) NOT NULL,
     custom_order_type character varying(120),
-    brand_catalog character varying(255) NOT NULL,
-    quantity integer NOT NULL,
     requester_name character varying(150) NOT NULL,
     reason text NOT NULL,
     status character varying(30) DEFAULT 'Submitted'::character varying NOT NULL,
     internal_notes text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    master_pr_id uuid,
+    merged_at timestamp with time zone,
+    merged_by uuid,
+    deleted_at timestamp with time zone,
+    deleted_by uuid,
     CONSTRAINT chk_pr_custom_order_type CHECK ((((order_type)::text <> 'Lain-Lain'::text) OR ((custom_order_type IS NOT NULL) AND (length(btrim((custom_order_type)::text)) > 0)))),
     CONSTRAINT purchase_requests_order_type_check CHECK (((order_type)::text = ANY (ARRAY[('Reagen'::character varying)::text, ('Tools'::character varying)::text, ('Expense Item'::character varying)::text, ('Reagen Mikro'::character varying)::text, ('Tools Mikro'::character varying)::text, ('RS/Reference Standard'::character varying)::text, ('Gas'::character varying)::text, ('Analisa External'::character varying)::text, ('Lain-Lain'::character varying)::text]))),
-    CONSTRAINT purchase_requests_quantity_check CHECK ((quantity > 0)),
-    CONSTRAINT purchase_requests_status_check CHECK (((status)::text = ANY (ARRAY[('Submitted'::character varying)::text, ('Review'::character varying)::text, ('Approved'::character varying)::text, ('Rejected'::character varying)::text, ('Ordered'::character varying)::text, ('Received'::character varying)::text, ('Closed'::character varying)::text])))
+    CONSTRAINT purchase_requests_status_check CHECK (((status)::text = ANY ((ARRAY['form_created'::character varying, 'op_penawaran'::character varying, 'op_proposal'::character varying, 'op_manager'::character varying, 'pending_po'::character varying, 'po_approve'::character varying, 'done'::character varying, 'rejected'::character varying, 'cancelled'::character varying])::text[])))
 );
 
 
@@ -242,6 +291,30 @@ ALTER TABLE ONLY public.knowledge_documents
 
 ALTER TABLE ONLY public.knowledge_documents
     ADD CONSTRAINT knowledge_documents_slug_key UNIQUE (slug);
+
+
+--
+-- Name: pr_number_counters pr_number_counters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pr_number_counters
+    ADD CONSTRAINT pr_number_counters_pkey PRIMARY KEY (period);
+
+
+--
+-- Name: purchase_request_audit_logs purchase_request_audit_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_request_audit_logs
+    ADD CONSTRAINT purchase_request_audit_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: purchase_request_items purchase_request_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_request_items
+    ADD CONSTRAINT purchase_request_items_pkey PRIMARY KEY (id);
 
 
 --
@@ -347,10 +420,59 @@ CREATE INDEX idx_knowledge_search ON public.knowledge_documents USING gin (searc
 
 
 --
+-- Name: idx_pr_audit_action; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_audit_action ON public.purchase_request_audit_logs USING btree (action);
+
+
+--
+-- Name: idx_pr_audit_request; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_audit_request ON public.purchase_request_audit_logs USING btree (purchase_request_id, created_at DESC);
+
+
+--
+-- Name: idx_pr_deleted_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_deleted_at ON public.purchase_requests USING btree (deleted_at);
+
+
+--
 -- Name: idx_pr_history_request_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_pr_history_request_id ON public.purchase_request_status_history USING btree (purchase_request_id, created_at DESC);
+
+
+--
+-- Name: idx_pr_items_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_items_created_at ON public.purchase_request_items USING btree (created_at);
+
+
+--
+-- Name: idx_pr_items_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_items_order ON public.purchase_request_items USING btree (purchase_request_id, sort_order);
+
+
+--
+-- Name: idx_pr_items_request_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_items_request_id ON public.purchase_request_items USING btree (purchase_request_id);
+
+
+--
+-- Name: idx_pr_master_pr_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_master_pr_id ON public.purchase_requests USING btree (master_pr_id);
 
 
 --
@@ -441,6 +563,30 @@ ALTER TABLE ONLY public.knowledge_documents
 
 
 --
+-- Name: purchase_request_audit_logs purchase_request_audit_logs_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_request_audit_logs
+    ADD CONSTRAINT purchase_request_audit_logs_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.admin_users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: purchase_request_audit_logs purchase_request_audit_logs_purchase_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_request_audit_logs
+    ADD CONSTRAINT purchase_request_audit_logs_purchase_request_id_fkey FOREIGN KEY (purchase_request_id) REFERENCES public.purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: purchase_request_items purchase_request_items_purchase_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_request_items
+    ADD CONSTRAINT purchase_request_items_purchase_request_id_fkey FOREIGN KEY (purchase_request_id) REFERENCES public.purchase_requests(id) ON DELETE CASCADE;
+
+
+--
 -- Name: purchase_request_status_history purchase_request_status_history_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -457,8 +603,32 @@ ALTER TABLE ONLY public.purchase_request_status_history
 
 
 --
+-- Name: purchase_requests purchase_requests_deleted_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_requests
+    ADD CONSTRAINT purchase_requests_deleted_by_fkey FOREIGN KEY (deleted_by) REFERENCES public.admin_users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: purchase_requests purchase_requests_master_pr_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_requests
+    ADD CONSTRAINT purchase_requests_master_pr_id_fkey FOREIGN KEY (master_pr_id) REFERENCES public.purchase_requests(id) ON DELETE SET NULL;
+
+
+--
+-- Name: purchase_requests purchase_requests_merged_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.purchase_requests
+    ADD CONSTRAINT purchase_requests_merged_by_fkey FOREIGN KEY (merged_by) REFERENCES public.admin_users(id) ON DELETE SET NULL;
+
+
+--
 -- PostgreSQL database dump complete
 --
 
-\unrestrict LH8l45fJxiUWVbhrAa1DgEmWV8RWNqcyl9H8zAWz1ZHL5OTKm5WX0tlYjBt47Id
+\unrestrict 4AdY92CjcGi4uCCflagx59iEkeufbPnqqhtgSYX2atm8WfbqAmcXAVktjWMikQM
 

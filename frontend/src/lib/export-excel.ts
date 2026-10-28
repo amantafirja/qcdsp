@@ -1,5 +1,6 @@
 import type { PurchaseRequest } from '@/types'
 import { formatDateTime } from '@/lib/format'
+import { statusLabel } from '@/lib/constants'
 
 function escapeXml(value: string | number | null | undefined): string {
   const text = value === null || value === undefined ? '' : String(value)
@@ -18,15 +19,17 @@ function cell(value: string | number | null | undefined, type: 'String' | 'Numbe
 export function exportPurchaseRequestsToExcel(requests: PurchaseRequest[], filename?: string) {
   const headers = [
     'No',
-    'Nomor Referensi',
+    'Nomor PR',
     'Tanggal',
     'Pemesan',
     'Jenis Pemesanan',
     'Deskripsi',
-    'Brand / Katalog',
-    'Jumlah',
+    'Daftar Item',
+    'Total Qty',
     'Alasan',
     'Status',
+    'PR Utama',
+    'PR Asal (Gabungan)',
     'Catatan Internal',
     'Lampiran',
     'Diperbarui',
@@ -48,6 +51,10 @@ export function exportPurchaseRequestsToExcel(requests: PurchaseRequest[], filen
         pr.order_type === 'Lain-Lain' && pr.custom_order_type
           ? `Lain-Lain - ${pr.custom_order_type}`
           : pr.order_type
+      const items = (pr.items ?? [])
+        .map((item) => `${item.item_name} (${item.quantity} ${item.unit})`)
+        .join(' | ')
+      const totalQuantity = (pr.items ?? []).reduce((sum, item) => sum + item.quantity, 0)
 
       return `<Row>${[
         cell(index + 1, 'Number'),
@@ -56,10 +63,12 @@ export function exportPurchaseRequestsToExcel(requests: PurchaseRequest[], filen
         cell(pr.requester_name),
         cell(orderType),
         cell(pr.description),
-        cell(pr.brand_catalog),
-        cell(pr.quantity, 'Number'),
+        cell(items),
+        cell(totalQuantity, 'Number'),
         cell(pr.reason),
-        cell(pr.status),
+        cell(statusLabel(pr.status)),
+        cell(pr.master?.reference_number ?? ''),
+        cell(pr.members.map((member) => member.reference_number).join(' | ')),
         cell(pr.internal_notes ?? ''),
         cell(attachments),
         cell(formatDateTime(pr.updated_at)),
@@ -91,15 +100,17 @@ export function exportPurchaseRequestsToExcel(requests: PurchaseRequest[], filen
   <Worksheet ss:Name="Purchase Requests">
     <Table>
       <Column ss:Width="40"/>
-      <Column ss:Width="130"/>
+      <Column ss:Width="160"/>
       <Column ss:Width="120"/>
       <Column ss:Width="140"/>
       <Column ss:Width="150"/>
-      <Column ss:Width="260"/>
-      <Column ss:Width="160"/>
-      <Column ss:Width="60"/>
       <Column ss:Width="240"/>
-      <Column ss:Width="90"/>
+      <Column ss:Width="300"/>
+      <Column ss:Width="70"/>
+      <Column ss:Width="220"/>
+      <Column ss:Width="120"/>
+      <Column ss:Width="160"/>
+      <Column ss:Width="200"/>
       <Column ss:Width="200"/>
       <Column ss:Width="200"/>
       <Column ss:Width="120"/>

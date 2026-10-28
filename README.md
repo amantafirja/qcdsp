@@ -20,30 +20,72 @@ Stack: **React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui** · **Go (Gin)
 - Pagination responsif.
 
 ### Administration Center — Purchase Request (tanpa login)
-- Form lengkap: deskripsi, jenis pemesanan (dropdown 9 opsi, field tambahan untuk **Lain-Lain**), brand/merk + nomor katalog, jumlah, pemesan, alasan (wajib), bukti SPV approve (wajib), penawaran (opsional).
-- Validasi frontend (Zod + React Hook Form) dan backend (service layer).
+- Form lengkap: deskripsi, jenis pemesanan (dropdown 9 opsi, field tambahan untuk **Lain-Lain**), **daftar item dinamis** (nama item, brand/katalog, jumlah, satuan, catatan), pemesan, alasan (wajib), bukti SPV approve (wajib), penawaran (opsional).
+- Validasi frontend (Zod + React Hook Form) dan backend (service layer), termasuk validasi per item.
 - Upload maksimal **10 MB** per file; SPV: PDF/JPG/JPEG/PNG; penawaran: PDF/XLSX/JPG/JPEG/PNG.
-- Setelah submit: data langsung tersimpan dan user menerima **nomor referensi** (`PR-YYYYMMDD-XXXX`).
-- **Tracking status** tanpa login + riwayat status + unduh lampiran.
+- Setelah submit: data langsung tersimpan dan sistem membuat **nomor PR otomatis** berformat `PRG/1GQ01/MMYY/XXXXX` (nomor tidak dapat diisi manual).
+- **Tracking status** tanpa login (`/tracking`), progress 9 tahap, daftar item + asal PR, riwayat status, dan unduh lampiran.
 
 ### Admin Panel (JWT)
 - **Login** username/password, token JWT, proteksi route.
 - **Account Management** (khusus Super Admin): CRUD akun admin, ubah role, reset password, aktif/nonaktif, proteksi agar selalu ada minimal satu Super Admin aktif dan akun sendiri tidak bisa dihapus/dinonaktifkan.
-- **Dashboard**: total dokumen/artikel/PDF, total per status PR, chart PR per bulan, distribusi jenis pemesanan, distribusi status, PR terbaru.
+- **Dashboard**: total dokumen/artikel/PDF, total PR, PR aktif, PR digabung, chart PR per bulan, distribusi jenis pemesanan, distribusi status, PR terbaru.
 - **Knowledge Management**: CRUD dokumen, upload PDF, upload gambar artikel, publish/unpublish.
 - **Category Management**: CRUD kategori dengan proteksi kategori yang masih dipakai.
-- **Purchase Request Management**: tabel PR, pencarian, filter status/jenis/rentang tanggal, detail PR, ubah status, catatan internal, unduh lampiran, **export Excel**. Untuk `pr_viewer` semua aksi ubah status/catatan disembunyikan dan ditolak backend (403).
+- **Purchase Request Management**: tabel PR dengan item, pencarian, filter status/jenis/rentang tanggal, detail PR, **ubah progress (hanya admin)**, catatan internal, **penggabungan PR (consolidation)**, **copy cepat**, **bulk copy**, **soft delete**, **audit trail**, unduh lampiran, dan **export Excel**. Untuk `pr_viewer` semua aksi ubah progress/catatan/penggabungan disembunyikan dan ditolak backend (403).
+
+### Nomor PR
+
+Format: `PRG/1GQ01/MMYY/XXXXX`
+
+- `PRG` dan `1GQ01` tetap, `MMYY` = bulan + tahun pembuatan, `XXXXX` = urutan 5 digit.
+- Urutan dimulai dari `00001` setiap bulan baru.
+- Nomor dibuat di dalam **transaksi database** memakai counter `pr_number_counters` dengan `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` (atomik, aman untuk submit bersamaan).
+- Nomor **tidak pernah dipakai ulang**: PR yang dihapus (soft delete), ditolak, atau dibatalkan tetap menaikkan counter.
+- Nomor PR **unik** (`reference_number` UNIQUE).
+
+### Workflow Progress PR
+
+| # | Status (kode) | Label |
+|---|---------------|-------|
+| 1 | `form_created` | Form Dibuat |
+| 2 | `op_penawaran` | OP Penawaran Purchasing |
+| 3 | `op_proposal` | OP Proposal |
+| 4 | `op_manager` | OP Manager |
+| 5 | `pending_po` | Pending PO |
+| 6 | `po_approve` | PO Approve |
+| 7 | `done` | Selesai (Done) |
+| 8 | `rejected` | Selesai (Reject) |
+| 9 | `cancelled` | Selesai (Cancel) |
+
+- Hanya admin (`super_admin` / `admin`) yang dapat mengubah progress; user hanya melihat.
+- Status akhir (`done`, `rejected`, `cancelled`) bersifat final dan tidak dapat diubah lagi.
+- Status `rejected` / `cancelled` wajib disertai catatan.
+
+### Penggabungan PR (Consolidation)
+
+- Admin memilih satu **PR Utama** dan satu/lebih **PR anggota**.
+- Item PR anggota otomatis tampil pada PR Utama; setiap item menyimpan **asal PR** (`origin_reference`).
+- PR anggota tetap tersimpan sebagai data dan histori, dengan `master_pr_id` menunjuk PR Utama.
+- Satu PR hanya boleh tergabung ke satu PR Utama aktif, dan PR yang sudah menjadi anggota tidak dapat menjadi master.
+- Admin dapat **membatalkan penggabungan** (satu per satu atau seluruhnya).
+- Tidak ada nomor PR baru — tetap memakai nomor PR Utama.
+- Detail PR menampilkan PR Utama, daftar PR asal, item gabungan, dan status penggabungan.
+
+### Copy Cepat & Audit Trail
+
+- Ikon **Copy** pada daftar PR, detail PR, dan halaman tracking; notifikasi "Data PR berhasil disalin."
+- **Bulk Copy**: pilih beberapa PR via checkbox lalu klik "Copy Selected".
+- Format copy mengikuti spesifikasi: nomor PR + item (satu item tanpa penomoran, banyak item bernomor; bulk copy memakai bullet `-`).
+- Audit trail merekam pembuatan PR, perubahan progress, penggabungan/pembatalan penggabungan, perubahan catatan, dan penghapusan, lengkap dengan aktor, role, waktu, serta data **sebelum/sesudah** (JSONB).
 
 **Role & hak akses:**
 
 | Role | Akses |
 |------|-------|
 | `super_admin` | Semua menu + Account Management (buat akun, ubah role, reset password, aktif/nonaktif, hapus) |
-| `admin` | Dashboard, Knowledge, Category, dan Purchase Request (tanpa Account Management) |
-| `pr_viewer` | **Read-only** Purchase Request: daftar, detail, unduh lampiran, export Excel |
-
-### Status PR
-`Submitted → Review → Approved → Ordered → Received → Closed` (plus `Rejected`).
+| `admin` | Dashboard, Knowledge, Category, dan Purchase Request (ubah progress, gabungkan PR, audit trail) |
+| `pr_viewer` | **Read-only** Purchase Request: daftar, detail, unduh lampiran, copy, export Excel |
 
 ---
 
@@ -68,7 +110,9 @@ qcdsp/
 │   ├── migrations/
 │   │   ├── embed.go
 │   │   ├── 001_init.sql            # schema PostgreSQL
-│   │   └── 002_admin_roles.sql     # role super_admin/admin/pr_viewer
+│   │   ├── 002_admin_roles.sql     # role super_admin/admin/pr_viewer
+│   │   ├── 003_pr_workflow.sql     # item PR, counter nomor, merge, audit, soft delete, status baru
+│   │   └── 004_pr_item_order.sql   # urutan item PR
 │   ├── uploads/                    # file upload (runtime)
 │   ├── .env.example
 │   ├── go.mod
@@ -82,7 +126,7 @@ qcdsp/
 │   │   │   └── admin/              # rich text editor
 │   │   ├── contexts/               # auth context
 │   │   ├── hooks/                  # React Query hooks
-│   │   ├── lib/                    # api client, format, constants, export
+│   │   ├── lib/                    # api client, format, constants, export, copy-pr, permissions
 │   │   ├── pages/
 │   │   │   ├── public/             # gateway, knowledge, PR, tracking, login
 │   │   │   └── admin/              # dashboard, knowledge, category, PR, akun
@@ -289,7 +333,10 @@ Dump hanya berisi data; file PDF/lampiran berada di `backend/uploads`. Jika fold
 | `admin_users` | Admin panel (username unik, password bcrypt, role, audit fields) |
 | `categories` | Kategori Knowledge Center (nama & slug unik) |
 | `knowledge_documents` | Dokumen PDF/artikel, `search_vector` GIN index, publish flag, view count |
-| `purchase_requests` | PR publik dengan nomor referensi unik dan status terbatas |
+| `purchase_requests` | PR publik: nomor unik, status workflow, `master_pr_id` (penggabungan), `deleted_at` (soft delete) |
+| `purchase_request_items` | Item PR (banyak item per PR) dengan urutan dan asal PR |
+| `pr_number_counters` | Counter nomor PR per periode `MMYY` (atomik, tanpa pemakaian ulang) |
+| `purchase_request_audit_logs` | Audit trail (aksi, aktor, role, data sebelum/sesudah JSONB) |
 | `attachments` | Lampiran PR (`spv_approval`, `quotation`), FK cascade |
 | `purchase_request_status_history` | Jejak perubahan status + catatan + admin |
 | `schema_migrations` | Kontrol versi migrasi |
@@ -300,7 +347,10 @@ Constraint penting:
 - `chk_pr_custom_order_type` — `Lain-Lain` wajib punya jenis kustom.
 - `chk_knowledge_pdf_file` / `chk_knowledge_article_content` — konsistensi tipe konten.
 - `chk_knowledge_pdf_size` — PDF ≤ 10 MB.
-- Enum via `CHECK` untuk `order_type`, `status`, `content_type`, `attachment_type`.
+- `purchase_request_items.quantity > 0` — jumlah item valid.
+- `purchase_requests.master_pr_id` — relasi PR Utama ↔ PR anggota (penggabungan).
+- `pr_number_counters.period` — satu baris counter per `MMYY`.
+- Enum via `CHECK` untuk `order_type`, `status` (9 workflow PR), `content_type`, `attachment_type`.
 
 ### Reset data
 
@@ -317,7 +367,7 @@ Folder `database/` berisi dump siap pakai:
 
 | File | Isi |
 |------|-----|
-| `database/qcdsp_dump.sql` | Schema + **seluruh data** (admin, kategori, dokumen, PR, lampiran, riwayat status) |
+| `database/qcdsp_dump.sql` | Schema + **seluruh data** (admin, kategori, dokumen, PR, item PR, relasi penggabungan, lampiran, riwayat status, audit trail, counter nomor PR) |
 | `database/qcdsp_schema.sql` | Schema saja (tabel, index, trigger, constraint) |
 
 Restore ke server/database baru (dibuat dengan `pg_dump 18.6`, format plain SQL, `--no-owner --no-privileges`):
@@ -356,9 +406,10 @@ Format response: `{ "success": bool, "message": string, "data": any, "errors": a
 | GET | `/knowledge` | Daftar dokumen published |
 | GET | `/knowledge/:id` | Detail dokumen (menambah view count) |
 | GET | `/knowledge/:id/pdf` | Preview/download PDF (`?download=1`) |
-| POST | `/purchase-requests` | Buat PR (multipart/form-data) |
-| GET | `/purchase-requests/status/:reference` | Tracking PR by nomor referensi |
-| GET | `/purchase-requests/status/:reference/attachments/:attachmentId` | Unduh lampiran PR |
+| POST | `/purchase-requests` | Buat PR (multipart/form-data), nomor PR dibuat otomatis |
+| GET | `/purchase-requests/track?reference=<nomor>` | Tracking PR (dipakai UI karena nomor mengandung `/`) |
+| GET | `/purchase-requests/track/attachments/:attachmentId?reference=<nomor>` | Unduh lampiran PR |
+| GET | `/purchase-requests/status/:reference` | Tracking PR (format lama, untuk nomor tanpa `/`) |
 | GET | `/files/*path` | File gambar artikel |
 
 Query `GET /knowledge`: `search`, `category` (slug), `category_id`, `content_type` (`pdf|article`), `sort` (`newest|oldest|title|popular|updated`), `page`, `page_size`.
@@ -366,8 +417,17 @@ Query `GET /knowledge`: `search`, `category` (slug), `category_id`, `content_typ
 Body `POST /purchase-requests` (multipart):
 
 ```
-description, order_type, custom_order_type, brand_catalog, quantity,
-requester_name, reason, spv_approval (file, wajib), quotation (file, opsional)
+description, order_type, custom_order_type, requester_name, reason,
+items (JSON array), spv_approval (file, wajib), quotation (file, opsional)
+```
+
+Contoh nilai `items`:
+
+```json
+[
+  {"item_name":"Laptop Dell Latitude 5450","brand_catalog":"DELL LAT5450","quantity":2,"unit":"unit","notes":"RAM 16GB"},
+  {"item_name":"Docking Station Dell","brand_catalog":"DELL WD19S","quantity":2,"unit":"unit"}
+]
 ```
 
 ### Admin
@@ -394,8 +454,12 @@ requester_name, reason, spv_approval (file, wajib), quotation (file, opsional)
 | POST | `/admin/uploads/image` | Upload gambar artikel |
 | GET | `/admin/purchase-requests` | Daftar PR + filter (semua role) |
 | GET | `/admin/purchase-requests/:id` | Detail PR + riwayat (semua role) |
-| PUT | `/admin/purchase-requests/:id/status` | Ubah status + catatan (`super_admin`, `admin`) |
+| PUT | `/admin/purchase-requests/:id/status` | Ubah progress + catatan (`super_admin`, `admin`) |
 | PUT | `/admin/purchase-requests/:id` | Simpan catatan internal (`super_admin`, `admin`) |
+| POST | `/admin/purchase-requests/:id/merge` | Gabungkan PR anggota ke PR `:id` sebagai PR Utama (`super_admin`, `admin`) |
+| POST | `/admin/purchase-requests/:id/unmerge` | Batalkan penggabungan; `member_ids` kosong = semua anggota (`super_admin`, `admin`) |
+| DELETE | `/admin/purchase-requests/:id` | Soft delete PR (`super_admin`, `admin`) |
+| GET | `/admin/purchase-requests/:id/audit` | Audit trail PR (`super_admin`, `admin`) |
 | GET | `/admin/purchase-requests/:id/attachments/:attachmentId` | Unduh lampiran (semua role) |
 
 Semua endpoint `/admin/*` (kecuali login) memerlukan header:
@@ -416,18 +480,27 @@ curl -X POST http://localhost:8080/api/admin/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"Admin123!"}'
 
-# Buat PR
+# Buat PR (dua item)
 curl -X POST http://localhost:8080/api/purchase-requests \
-  -F "description=Pembelian reagen buffer pH 7,00" \
-  -F "order_type=Reagen" \
-  -F "brand_catalog=MERCK 1.098439.1000" \
-  -F "quantity=6" \
+  -F "description=Pembelian laptop dan docking untuk analis lab" \
+  -F "order_type=Tools" \
   -F "requester_name=Rina Wulandari" \
-  -F "reason=Stok menipis untuk pengujian harian" \
+  -F "reason=Perangkat lama tidak mendukung software instrumen terbaru" \
+  -F 'items=[{"item_name":"Laptop Dell Latitude 5450","brand_catalog":"DELL LAT5450","quantity":2,"unit":"unit"},{"item_name":"Docking Station Dell","brand_catalog":"DELL WD19S","quantity":2,"unit":"unit"}]' \
   -F "spv_approval=@bukti-spv.pdf"
 
-# Tracking
-curl http://localhost:8080/api/purchase-requests/status/PR-20260601-0001
+# Tracking (nomor PR mengandung "/" sehingga dikirim sebagai query)
+curl "http://localhost:8080/api/purchase-requests/track?reference=PRG%2F1GQ01%2F1026%2F00001"
+
+# Gabungkan PR lain ke PR utama
+curl -X POST http://localhost:8080/api/admin/purchase-requests/<master-id>/merge \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"member_ids":["<member-id>"]}'
+
+# Audit trail
+curl http://localhost:8080/api/admin/purchase-requests/<id>/audit \
+  -H "Authorization: Bearer <token>"
 ```
 
 ---
@@ -442,6 +515,9 @@ curl http://localhost:8080/api/purchase-requests/status/PR-20260601-0001
 - **Upload**: nama file di-generate UUID (mencegah path traversal & overwrite), ekstensi di-whitelist, limit body via `http.MaxBytesReader`, file dihapus jika validasi gagal.
 - **CORS**: whitelist origin dari env, bukan `*`.
 - **SQL**: seluruh query memakai parameter binding (`$1`, `$2`, ...).
+- **Nomor PR**: dibuat dalam transaksi dengan counter baris (`INSERT ... ON CONFLICT DO UPDATE ... RETURNING`) sehingga aman terhadap submit bersamaan dan tidak pernah memakai ulang nomor (termasuk PR yang dihapus/ditolak/dibatalkan).
+- **Soft delete**: PR tidak dihapus fisik (`deleted_at`, `deleted_by`); seluruh relasi dan audit trail tetap utuh.
+- **Audit trail**: perubahan penting dicatat pada `purchase_request_audit_logs` dengan aktor, role, waktu, dan data sebelum/sesudah (JSONB), ditulis dalam transaksi yang sama dengan perubahan datanya.
 - **XSS**: konten artikel berupa HTML dari admin terautentikasi; render melalui `dangerouslySetInnerHTML` hanya pada halaman artikel. Untuk produksi dengan banyak admin, disarankan menambahkan sanitizer (mis. `bluemonday`) di backend.
 
 ---
@@ -522,7 +598,8 @@ Catatan produksi:
 - 1 akun view-only (`viewer` / `Viewer123!`, role `pr_viewer`)
 - 7 kategori: FAQ, SOP, Work Instruction, Manual, Troubleshooting, Artikel, Dokumen PDF
 - 8 dokumen (7 published + 1 draft artikel); 3 di antaranya PDF contoh yang di-generate otomatis lengkap dengan xref sehingga preview di browser berjalan normal
-- 14 Purchase Request dengan distribusi status dan rentang 12 bulan terakhir, lengkap dengan lampiran SPV contoh (PDF valid) dan riwayat status
+- 14 Purchase Request dengan **nomor format baru** (`PRG/1GQ01/MMYY/XXXXX`, counter per bulan), item (1-3 item per PR), distribusi 9 status workflow, rentang 12 bulan terakhir, lampiran SPV contoh (PDF valid), riwayat status, dan audit awal
+- Counter `pr_number_counters` disinkronkan sehingga PR berikutnya melanjutkan urutan terakhir
 
 ---
 
@@ -560,6 +637,10 @@ Catatan produksi:
 | Login gagal | Jalankan seeder; cek username/password |
 | Menu atau endpoint mengembalikan 403 | Role akun tidak punya hak akses; atur lewat **Account Management** (Super Admin) |
 | Login ditolak "Akun admin tidak aktif" | Akun dinonaktifkan Super Admin; aktifkan kembali di Account Management |
+| Tracking PR tidak ditemukan padahal nomor benar | Nomor berformat `PRG/1GQ01/MMYY/XXXXX`; UI memakai `GET /purchase-requests/track?reference=...` (jangan menaruh nomor di path karena mengandung `/`) |
+| Progress PR tidak bisa diubah | Status sudah final (`done`/`rejected`/`cancelled`) atau akun bukan `super_admin`/`admin` |
+| PR tidak bisa digabungkan | PR sudah menjadi anggota PR lain, sudah menjadi PR Utama, berstatus final, atau dihapus (soft delete) |
+| Nomor PR "loncat" | Normal: nomor PR yang dihapus/ditolak/dibatalkan tidak pernah dipakai ulang |
 | `npm install` lambat/ECONNRESET | Gunakan `--registry=https://registry.npmmirror.com` |
 | `Failed to resolve entry for package ...` / modul tidak ditemukan | `node_modules` ter-ekstrak tidak lengkap (install terputus). Stop dev server, hapus `node_modules` + `node_modules/.vite`, lalu `npm ci` |
 | Preview/download PDF 404 | File tidak ada di `backend/uploads` (tidak ikut git). Copy folder uploads dari PC asal, atau pakai database baru + seeder |

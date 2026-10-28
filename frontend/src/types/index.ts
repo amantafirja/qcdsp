@@ -103,35 +103,72 @@ export interface StatusHistoryEntry {
   created_at: string
 }
 
+export interface PurchaseRequestItem {
+  id: string
+  purchase_request_id: string
+  item_name: string
+  brand_catalog: string
+  quantity: number
+  unit: string
+  notes: string | null
+  origin_pr_id: string
+  origin_reference: string
+  origin_is_master: boolean
+  created_at: string
+}
+
+export interface PRReference {
+  id: string
+  reference_number: string
+  status: string
+  requester_name?: string
+  item_count?: number
+  merged_at?: string | null
+}
+
 export interface PurchaseRequest {
   id: string
   reference_number: string
   description: string
   order_type: string
   custom_order_type: string | null
-  brand_catalog: string
-  quantity: number
   requester_name: string
   reason: string
   status: string
+  status_label: string
   internal_notes: string | null
+  items: PurchaseRequestItem[]
   attachments: Attachment[]
   status_history?: StatusHistoryEntry[]
+  master?: PRReference | null
+  members: PRReference[]
+  is_master: boolean
+  is_merged: boolean
+  merged_at: string | null
+  deleted_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface PRAuditLog {
+  id: string
+  action: string
+  actor_id: string | null
+  actor_name: string
+  actor_role: string
+  notes: string | null
+  before_data: unknown
+  after_data: unknown
+  created_at: string
 }
 
 export interface DashboardStats {
   total_documents: number
   total_articles: number
   total_pdf: number
-  total_submitted: number
-  total_review: number
-  total_approved: number
-  total_rejected: number
-  total_ordered: number
-  total_received: number
-  total_closed: number
+  total_pr: number
+  total_active: number
+  total_merged: number
 }
 
 export interface MonthlyCount {
