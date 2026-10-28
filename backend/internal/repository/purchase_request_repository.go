@@ -53,7 +53,7 @@ type PurchaseRequestRepository interface {
 	MonthlyCounts(ctx context.Context, months int) ([]models.MonthlyCount, error)
 	OrderTypeCounts(ctx context.Context) ([]models.TypeCount, error)
 	Recent(ctx context.Context, limit int) ([]models.PurchaseRequest, error)
-	PRSummary(ctx context.Context) (total, active, merged int, err error)
+	PRMetrics(ctx context.Context) (models.PRMetrics, error)
 }
 
 type purchaseRequestRepository struct {
@@ -178,7 +178,7 @@ func nextReference(ctx context.Context, tx *sql.Tx) (string, error) {
 }
 
 func (r *purchaseRequestRepository) List(ctx context.Context, filter PRFilter) ([]models.PurchaseRequest, int, error) {
-	conditions := []string{"p.deleted_at IS NULL"}
+	conditions := []string{"p.deleted_at IS NULL", "p.master_pr_id IS NULL"}
 	args := []interface{}{}
 	argIndex := 1
 
@@ -856,7 +856,7 @@ func (r *purchaseRequestRepository) CountByStatus(ctx context.Context) (map[stri
 		result[status] = 0
 	}
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT status, COUNT(*) FROM purchase_requests WHERE deleted_at IS NULL GROUP BY status")
+		"SELECT status, COUNT(*) FROM purchase_requests WHERE deleted_at IS NULL AND master_pr_id IS NULL GROUP BY status")
 	if err != nil {
 		return nil, err
 	}
@@ -886,6 +886,7 @@ func (r *purchaseRequestRepository) MonthlyCounts(ctx context.Context, months in
 			SELECT DATE_TRUNC('month', created_at) AS month, COUNT(*) AS count
 			FROM purchase_requests
 			WHERE deleted_at IS NULL
+			  AND master_pr_id IS NULL
 			  AND created_at >= DATE_TRUNC('month', NOW()) - (($1::int - 1) * INTERVAL '1 month')
 			GROUP BY DATE_TRUNC('month', created_at)
 		) p ON p.month = m.month
@@ -909,7 +910,7 @@ func (r *purchaseRequestRepository) MonthlyCounts(ctx context.Context, months in
 func (r *purchaseRequestRepository) OrderTypeCounts(ctx context.Context) ([]models.TypeCount, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT order_type, COUNT(*) FROM purchase_requests
-		WHERE deleted_at IS NULL
+		WHERE deleted_at IS NULL AND master_pr_id IS NULL
 		GROUP BY order_type ORDER BY COUNT(*) DESC`)
 	if err != nil {
 		return nil, err
@@ -929,7 +930,7 @@ func (r *purchaseRequestRepository) OrderTypeCounts(ctx context.Context) ([]mode
 
 func (r *purchaseRequestRepository) Recent(ctx context.Context, limit int) ([]models.PurchaseRequest, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT"+prSelectColumns+prFrom+" WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT $1", limit)
+		"SELECT"+prSelectColumns+prFrom+" WHERE p.deleted_at IS NULL AND p.master_pr_id IS NULL ORDER BY p.created_at DESC LIMIT $1", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -964,15 +965,31 @@ func (r *purchaseRequestRepository) Recent(ctx context.Context, limit int) ([]mo
 	return results, nil
 }
 
-func (r *purchaseRequestRepository) PRSummary(ctx context.Context) (int, int, int, error) {
-	var total, active, merged int
+func (r *purchaseRequestRepository) PRMetrics(ctx context.Context) (models.PRMetrics, error) {
+	var metrics models.PRMetrics
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(*),
-		       COUNT(*) FILTER (WHERE status NOT IN ('done', 'rejected', 'cancelled')),
-		       COUNT(*) FILTER (WHERE master_pr_id IS NOT NULL)
+		       COUNT(*) FILTER (WHERE status IN ('form_created', 'op_penawaran', 'op_proposal', 'op_manager', 'pending_po')),
+		       COUNT(*) FILTER (WHERE status = 'op_manager'),
+		       COUNT(*) FILTER (WHERE status IN ('po_approve', 'done')),
+		       COUNT(*) FILTER (WHERE status IN ('done', 'rejected', 'cancelled')),
+		       COUNT(*) FILTER (WHERE status = 'po_approve')
 		FROM purchase_requests
-		WHERE deleted_at IS NULL`).Scan(&total, &active, &merged)
-	return total, active, merged, err
+		WHERE deleted_at IS NULL AND master_pr_id IS NULL`).Scan(
+		&metrics.Total, &metrics.Open, &metrics.PendingApproval,
+		&metrics.Approved, &metrics.Closed, &metrics.OutstandingDelivery,
+	)
+	if err != nil {
+		return metrics, err
+	}
+
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM purchase_requests
+		WHERE deleted_at IS NULL AND master_pr_id IS NOT NULL`).Scan(&metrics.Merged); err != nil {
+		return metrics, err
+	}
+
+	return metrics, nil
 }
 
 func scanPRRow(row rowScanner) (*models.PurchaseRequest, error) {
@@ -991,6 +1008,7 @@ func scanPRRow(row rowScanner) (*models.PurchaseRequest, error) {
 	}
 	pr.StatusLabel = models.StatusLabel(pr.Status)
 	pr.IsMerged = masterID != nil
+	pr.MemberCount = memberCount
 	pr.IsMaster = memberCount > 0
 	pr.Members = []models.PRReference{}
 	if masterID != nil {

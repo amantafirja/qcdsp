@@ -347,7 +347,7 @@ export function PurchaseRequestDetailPage() {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
           <section className="surface-card p-5">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+            <h3 className="section-title flex items-center gap-2">
               <FileText className="h-4 w-4 text-navy-400" />
               Data Pengajuan
             </h3>
@@ -383,7 +383,7 @@ export function PurchaseRequestDetailPage() {
 
           <section className="surface-card p-5">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+              <h3 className="section-title flex items-center gap-2">
                 <Package className="h-4 w-4 text-navy-400" />
                 Daftar Item ({pr.items.length})
               </h3>
@@ -436,7 +436,7 @@ export function PurchaseRequestDetailPage() {
           {pr.is_master && (
             <section className="surface-card p-5">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                <h3 className="section-title flex items-center gap-2">
                   <Layers className="h-4 w-4 text-navy-400" />
                   PR Asal yang Digabungkan ({pr.members.length})
                 </h3>
@@ -496,7 +496,7 @@ export function PurchaseRequestDetailPage() {
           )}
 
           <section className="surface-card p-5">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+            <h3 className="section-title flex items-center gap-2">
               <Download className="h-4 w-4 text-navy-400" />
               Lampiran
             </h3>
@@ -509,7 +509,7 @@ export function PurchaseRequestDetailPage() {
           <section className="surface-card p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                <h3 className="section-title flex items-center gap-2">
                   <StickyNote className="h-4 w-4 text-navy-400" />
                   Catatan Internal
                 </h3>
@@ -550,7 +550,7 @@ export function PurchaseRequestDetailPage() {
 
           {canEdit && (
             <section className="surface-card p-5">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+              <h3 className="section-title flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-navy-400" />
                 Audit Trail
               </h3>
@@ -594,7 +594,7 @@ export function PurchaseRequestDetailPage() {
 
         <aside className="space-y-5">
           <section className="surface-card p-5">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+            <h3 className="section-title flex items-center gap-2">
               <History className="h-4 w-4 text-navy-400" />
               Riwayat Progress
             </h3>
@@ -635,7 +635,7 @@ export function PurchaseRequestDetailPage() {
 
           {canEdit && !terminal && (
             <section className="surface-card p-5">
-              <h3 className="text-sm font-semibold text-navy-900">Ubah Progress Cepat</h3>
+              <h3 className="section-title">Ubah Progress Cepat</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Progress hanya dapat diubah manual oleh admin.
               </p>

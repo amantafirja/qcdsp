@@ -142,6 +142,7 @@ export interface PurchaseRequest {
   status_history?: StatusHistoryEntry[]
   master?: PRReference | null
   members: PRReference[]
+  member_count: number
   is_master: boolean
   is_merged: boolean
   merged_at: string | null
@@ -167,6 +168,11 @@ export interface DashboardStats {
   total_articles: number
   total_pdf: number
   total_pr: number
+  total_open: number
+  total_pending_approval: number
+  total_approved: number
+  total_closed: number
+  total_outstanding_delivery: number
   total_active: number
   total_merged: number
 }

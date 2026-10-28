@@ -29,7 +29,7 @@ Stack: **React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui** · **Go (Gin)
 ### Admin Panel (JWT)
 - **Login** username/password, token JWT, proteksi route.
 - **Account Management** (khusus Super Admin): CRUD akun admin, ubah role, reset password, aktif/nonaktif, proteksi agar selalu ada minimal satu Super Admin aktif dan akun sendiri tidak bisa dihapus/dinonaktifkan.
-- **Dashboard**: total dokumen/artikel/PDF, total PR, PR aktif, PR digabung, chart PR per bulan, distribusi jenis pemesanan, distribusi status, PR terbaru.
+- **Dashboard**: 5 kartu statistik utama (**Total Open PR**, **Pending Approval**, **Total Approved PR**, **Outstanding Delivery**, **Total Closed PR**), ringkasan dokumen Knowledge Center, chart PR per bulan, distribusi jenis pemesanan, distribusi status, dan PR terbaru.
 - **Knowledge Management**: CRUD dokumen, upload PDF, upload gambar artikel, publish/unpublish.
 - **Category Management**: CRUD kategori dengan proteksi kategori yang masih dipakai.
 - **Purchase Request Management**: tabel PR dengan item, pencarian, filter status/jenis/rentang tanggal, detail PR, **ubah progress (hanya admin)**, catatan internal, **penggabungan PR (consolidation)**, **copy cepat**, **bulk copy**, **soft delete**, **audit trail**, unduh lampiran, dan **export Excel**. Untuk `pr_viewer` semua aksi ubah progress/catatan/penggabungan disembunyikan dan ditolak backend (403).
@@ -71,6 +71,7 @@ Format: `PRG/1GQ01/MMYY/XXXXX`
 - Admin dapat **membatalkan penggabungan** (satu per satu atau seluruhnya).
 - Tidak ada nomor PR baru — tetap memakai nomor PR Utama.
 - Detail PR menampilkan PR Utama, daftar PR asal, item gabungan, dan status penggabungan.
+- Daftar PR hanya menampilkan PR Utama; item PR gabungan langsung tampil pada baris PR Utama dengan penanda asal PR dan badge "Gabungan N PR".
 
 ### Copy Cepat & Audit Trail
 
@@ -86,6 +87,24 @@ Format: `PRG/1GQ01/MMYY/XXXXX`
 | `super_admin` | Semua menu + Account Management (buat akun, ubah role, reset password, aktif/nonaktif, hapus) |
 | `admin` | Dashboard, Knowledge, Category, dan Purchase Request (ubah progress, gabungkan PR, audit trail) |
 | `pr_viewer` | **Read-only** Purchase Request: daftar, detail, unduh lampiran, copy, export Excel |
+
+**Definisi kartu statistik dashboard** (hanya menghitung PR Utama, PR anggota tidak dihitung terpisah):
+
+| Kartu | Cakupan status |
+|-------|----------------|
+| Total Open PR | `form_created`, `op_penawaran`, `op_proposal`, `op_manager`, `pending_po` |
+| Pending Approval | `op_manager` |
+| Total Approved PR | `po_approve`, `done` |
+| Outstanding Delivery | `po_approve` (PO disetujui, belum selesai/diterima) |
+| Total Closed PR | `done`, `rejected`, `cancelled` |
+
+### Standar UI
+
+- Font **Inter** dengan ukuran teks minimum **14px**; isi tabel 14-15px; judul section 18-24px.
+- Warna netral (putih/abu muda) dengan aksen biru perusahaan, border tipis, card layout, dan whitespace lega.
+- Dashboard memakai 5 kartu statistik besar dengan ikon; status PR ditampilkan sebagai kartu ringkas.
+- Form PR dibagi menjadi 4 langkah (Deskripsi, Item & Jenis, Pemesan, Lampiran) dengan indikator kelengkapan.
+- Responsif: kartu menyesuaikan grid, tabel dapat di-scroll horizontal pada layar kecil.
 
 ---
 

@@ -219,7 +219,7 @@ export function PurchaseRequestManagementPage() {
     <div className="space-y-5">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-navy-900">Purchase Request Management</h2>
+          <h2 className="text-2xl font-bold tracking-tight text-navy-900">Purchase Request Management</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {canEdit
               ? 'Tinjau seluruh pengajuan PR, ubah progress, gabungkan PR, dan unduh lampiran.'
@@ -359,11 +359,10 @@ export function PurchaseRequestManagementPage() {
           </div>
         ) : (
           <>
-            <div className="hidden xl:block">
-              <Table>
+            <Table className="min-w-[880px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-10">
+                    <TableHead className="w-12">
                       <input
                         type="checkbox"
                         className="h-4 w-4 rounded border-navy-300 text-primary-600"
@@ -372,19 +371,18 @@ export function PurchaseRequestManagementPage() {
                         aria-label="Pilih semua PR"
                       />
                     </TableHead>
-                    <TableHead className="w-[130px]">Tanggal</TableHead>
-                    <TableHead>Referensi & Pemesan</TableHead>
-                    <TableHead className="min-w-[220px]">Item</TableHead>
-                    <TableHead>Jenis</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-center">Relasi PR</TableHead>
-                    <TableHead className="w-28 text-right">Aksi</TableHead>
+                    <TableHead className="w-[140px]">Tanggal</TableHead>
+                    <TableHead className="min-w-[200px]">Referensi &amp; Pemesan</TableHead>
+                    <TableHead className="min-w-[320px]">Item</TableHead>
+                    <TableHead className="w-[150px]">Jenis</TableHead>
+                    <TableHead className="w-[190px]">Status</TableHead>
+                    <TableHead className="w-[130px] text-right">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {requests.map((pr) => (
-                    <TableRow key={pr.id}>
-                      <TableCell>
+                    <TableRow key={pr.id} className="align-top">
+                      <TableCell className="pt-4">
                         <input
                           type="checkbox"
                           className="h-4 w-4 rounded border-navy-300 text-primary-600"
@@ -393,53 +391,72 @@ export function PurchaseRequestManagementPage() {
                           aria-label={`Pilih ${pr.reference_number}`}
                         />
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-navy-600">
+                      <TableCell className="whitespace-nowrap pt-4 text-sm text-navy-600">
                         {formatDate(pr.created_at, 'dd MMM yyyy')}
-                        <span className="block text-[10px] text-navy-400">
+                        <span className="block text-sm text-navy-400">
                           {formatDate(pr.created_at, 'HH:mm')}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="pt-4">
                         <Link
                           to={`/admin/purchase-requests/${pr.id}`}
-                          className="font-mono text-[11px] font-semibold text-primary-700 hover:underline"
+                          className="font-mono text-sm font-semibold text-primary-700 hover:underline"
                         >
                           {pr.reference_number}
                         </Link>
-                        <p className="mt-0.5 text-xs font-medium text-navy-900">{pr.requester_name}</p>
+                        <p className="mt-1 text-sm font-medium text-navy-900">{pr.requester_name}</p>
+                        {pr.is_master && (
+                          <Badge variant="default" className="mt-1.5">
+                            <Layers className="h-3 w-3" />
+                            Gabungan {pr.member_count} PR
+                          </Badge>
+                        )}
                       </TableCell>
-                      <TableCell className="max-w-[320px]">
-                        <p className="line-clamp-2 text-xs leading-relaxed text-navy-700">
-                          {pr.items.length > 0
-                            ? pr.items.map((item) => item.item_name).join(', ')
-                            : pr.description}
-                        </p>
-                        <p className="mt-0.5 text-[10px] text-navy-400">
-                          {pr.items.length} item
-                          {pr.items.length > 0 &&
-                            ` · total ${pr.items.reduce((sum, item) => sum + item.quantity, 0)}`}
+                      <TableCell className="pt-4">
+                        {pr.items.length === 0 ? (
+                          <p className="line-clamp-2 text-sm leading-relaxed text-navy-700">
+                            {pr.description}
+                          </p>
+                        ) : (
+                          <ul className="space-y-1.5">
+                            {pr.items.slice(0, 4).map((item) => (
+                              <li key={item.id} className="flex items-start gap-2 text-sm leading-snug">
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary-400" />
+                                <span className="min-w-0">
+                                  <span className="font-medium text-navy-900">{item.item_name}</span>
+                                  <span className="text-navy-500">
+                                    {' '}
+                                    · {item.quantity} {item.unit}
+                                  </span>
+                                  {!item.origin_is_master && (
+                                    <span className="ml-1.5 inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                                      dari {item.origin_reference}
+                                    </span>
+                                  )}
+                                </span>
+                              </li>
+                            ))}
+                            {pr.items.length > 4 && (
+                              <li className="pl-3.5 text-sm text-navy-400">
+                                +{pr.items.length - 4} item lainnya
+                              </li>
+                            )}
+                          </ul>
+                        )}
+                        <p className="mt-1.5 pl-3.5 text-sm text-navy-400">
+                          {pr.items.length} item · total{' '}
+                          {pr.items.reduce((sum, item) => sum + item.quantity, 0)}
                         </p>
                       </TableCell>
-                      <TableCell>
-                        <span className="inline-block rounded-md bg-navy-50 px-2 py-0.5 text-[11px] font-medium text-navy-700">
+                      <TableCell className="pt-4">
+                        <span className="inline-block rounded-lg bg-navy-50 px-2.5 py-1 text-sm font-medium text-navy-700">
                           {pr.order_type === 'Lain-Lain' ? pr.custom_order_type ?? pr.order_type : pr.order_type}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="pt-4">
                         <StatusBadge status={pr.status} />
                       </TableCell>
-                      <TableCell className="text-center">
-                        {pr.is_master ? (
-                          <Badge variant="default">Utama ({pr.members.length})</Badge>
-                        ) : pr.is_merged && pr.master ? (
-                          <span className="font-mono text-[10px] text-navy-500">
-                            {pr.master.reference_number}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-navy-300">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
+                      <TableCell className="pt-4">
                         <div className="flex items-center justify-end gap-1">
                           <Button
                             variant="ghost"
@@ -447,7 +464,7 @@ export function PurchaseRequestManagementPage() {
                             onClick={() => void handleCopy(pr)}
                             aria-label={`Salin ${pr.reference_number}`}
                           >
-                            <Copy className="h-3.5 w-3.5" />
+                            <Copy className="h-4 w-4" />
                           </Button>
                           <Button variant="ghost" size="icon-sm" asChild aria-label="Buka detail">
                             <Link to={`/admin/purchase-requests/${pr.id}`}>
@@ -462,7 +479,7 @@ export function PurchaseRequestManagementPage() {
                               aria-label={`Hapus ${pr.reference_number}`}
                               className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           )}
                         </div>
@@ -471,68 +488,6 @@ export function PurchaseRequestManagementPage() {
                   ))}
                 </TableBody>
               </Table>
-            </div>
-
-            <div className="divide-y divide-border xl:hidden">
-              {requests.map((pr) => (
-                <div key={pr.id} className="p-4 transition-colors hover:bg-navy-50/40">
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      className="mt-1 h-4 w-4 rounded border-navy-300 text-primary-600"
-                      checked={selected.includes(pr.id)}
-                      onChange={() => toggleSelected(pr.id)}
-                      aria-label={`Pilih ${pr.reference_number}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <Link to={`/admin/purchase-requests/${pr.id}`} className="block">
-                        <p className="font-mono text-[11px] font-semibold text-primary-700">
-                          {pr.reference_number}
-                        </p>
-                        <p className="mt-0.5 line-clamp-2 text-sm font-medium text-navy-900">
-                          {pr.items.length > 0
-                            ? pr.items.map((item) => item.item_name).join(', ')
-                            : pr.description}
-                        </p>
-                        <p className="mt-1 text-xs text-navy-400">
-                          {pr.requester_name} · {formatDate(pr.created_at)}
-                        </p>
-                      </Link>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <StatusBadge status={pr.status} />
-                        <span className="rounded-md bg-navy-50 px-2 py-0.5 text-[10px] font-medium text-navy-700">
-                          {pr.order_type === 'Lain-Lain' ? pr.custom_order_type ?? pr.order_type : pr.order_type}
-                        </span>
-                        <span className="text-[10px] text-navy-400">{pr.items.length} item</span>
-                        {pr.is_master && <Badge variant="default">PR Utama</Badge>}
-                        {pr.is_merged && pr.master && (
-                          <span className="font-mono text-[10px] text-navy-500">
-                            ke {pr.master.reference_number}
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-2 flex gap-1">
-                        <Button variant="outline" size="sm" onClick={() => void handleCopy(pr)}>
-                          <Copy className="h-3.5 w-3.5" />
-                          Copy
-                        </Button>
-                        {canEdit && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setDeleteTarget(pr)}
-                            className="text-rose-600"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Hapus
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
 
             <div className="border-t border-border p-4">
               <PaginationBar

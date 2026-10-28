@@ -40,6 +40,12 @@ const adminNav: Array<{
 }> = [
   { label: 'Dashboard', to: '/admin', icon: LayoutDashboard, end: true, roles: ['super_admin', 'admin'] },
   {
+    label: 'Purchase Request',
+    to: '/admin/purchase-requests',
+    icon: Package,
+    roles: ['super_admin', 'admin', 'pr_viewer'],
+  },
+  {
     label: 'Knowledge Management',
     to: '/admin/knowledge',
     icon: ClipboardList,
@@ -50,12 +56,6 @@ const adminNav: Array<{
     to: '/admin/categories',
     icon: FolderTree,
     roles: ['super_admin', 'admin'],
-  },
-  {
-    label: 'Purchase Request',
-    to: '/admin/purchase-requests',
-    icon: Package,
-    roles: ['super_admin', 'admin', 'pr_viewer'],
   },
   { label: 'Account Management', to: '/admin/accounts', icon: Users, roles: ['super_admin'] },
 ]

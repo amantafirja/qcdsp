@@ -93,6 +93,7 @@ type PurchaseRequest struct {
 	StatusHistory   []StatusHistoryEntry  `json:"status_history,omitempty"`
 	Master          *PRReference          `json:"master,omitempty"`
 	Members         []PRReference         `json:"members"`
+	MemberCount     int                   `json:"member_count"`
 	IsMaster        bool                  `json:"is_master"`
 	IsMerged        bool                  `json:"is_merged"`
 	MergedAt        *time.Time            `json:"merged_at"`
@@ -139,9 +140,24 @@ type DashboardStats struct {
 	TotalArticles  int `json:"total_articles"`
 	TotalPDF       int `json:"total_pdf"`
 
-	TotalPR     int `json:"total_pr"`
-	TotalActive int `json:"total_active"`
-	TotalMerged int `json:"total_merged"`
+	TotalPR                 int `json:"total_pr"`
+	TotalOpen               int `json:"total_open"`
+	TotalPendingApproval    int `json:"total_pending_approval"`
+	TotalApproved           int `json:"total_approved"`
+	TotalClosed             int `json:"total_closed"`
+	TotalOutstandingDelivery int `json:"total_outstanding_delivery"`
+	TotalActive             int `json:"total_active"`
+	TotalMerged             int `json:"total_merged"`
+}
+
+type PRMetrics struct {
+	Total               int
+	Open                int
+	PendingApproval     int
+	Approved            int
+	Closed              int
+	OutstandingDelivery int
+	Merged              int
 }
 
 type MonthlyCount struct {

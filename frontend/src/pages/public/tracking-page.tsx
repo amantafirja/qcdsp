@@ -160,7 +160,7 @@ export function TrackingPage() {
                   <Info className="h-5 w-5" />
                 </span>
                 <div>
-                  <h2 className="text-sm font-semibold text-navy-900">Cara tracking pengajuan</h2>
+                  <h2 className="text-lg font-semibold tracking-tight text-navy-900">Cara tracking pengajuan</h2>
                   <ol className="mt-2 space-y-1.5 text-sm leading-relaxed text-muted-foreground">
                     <li>1. Gunakan nomor referensi yang ditampilkan setelah submit PR.</li>
                     <li>2. Nomor referensi berformat PRG/1GQ01/MMYY/XXXXX.</li>
@@ -233,11 +233,11 @@ export function TrackingPage() {
                 )}
 
                 <div className="mt-6 border-t border-navy-100 pt-5">
-                  <h2 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                  <h2 className="section-title flex items-center gap-2">
                     <Package className="h-4 w-4 text-navy-400" />
                     Daftar Item ({result.items.length})
                   </h2>
-                  <div className="mt-3 overflow-hidden rounded-lg border border-navy-100">
+                  <div className="mt-3 overflow-x-auto rounded-lg border border-navy-100">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-navy-50/60 text-[11px] uppercase tracking-wide text-navy-500">
                         <tr>
@@ -294,7 +294,7 @@ export function TrackingPage() {
 
             <div className="grid gap-5 lg:grid-cols-2">
               <div className="surface-card p-5">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                <h2 className="section-title flex items-center gap-2">
                   <FileText className="h-4 w-4 text-navy-400" />
                   Lampiran
                 </h2>
@@ -335,7 +335,7 @@ export function TrackingPage() {
               </div>
 
               <div className="surface-card p-5">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+                <h2 className="section-title flex items-center gap-2">
                   <Clock className="h-4 w-4 text-navy-400" />
                   Riwayat Status
                 </h2>

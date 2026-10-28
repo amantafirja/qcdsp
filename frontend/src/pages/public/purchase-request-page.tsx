@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   ArrowRight,
+  Check,
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
@@ -32,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { FileUpload } from '@/components/shared/file-upload'
 import { ORDER_TYPES, ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_SPV_EXTENSIONS } from '@/lib/constants'
 import { buildPRCopyText, copyText } from '@/lib/copy-pr'
+import { cn } from '@/lib/utils'
 import { formatDateTime } from '@/lib/format'
 import type { PurchaseRequest } from '@/types'
 
@@ -122,6 +124,14 @@ export function PurchaseRequestPage() {
   const description = watch('description')
   const reason = watch('reason')
   const items = watch('items')
+  const requesterName = watch('requester_name')
+
+  const stepDone = {
+    deskripsi: (description ?? '').trim().length >= 10,
+    item: Boolean(orderType) && Boolean(items?.[0]?.item_name?.trim()),
+    pemesan: Boolean(requesterName?.trim()) && (reason ?? '').trim().length >= 10,
+    lampiran: Boolean(spvFile),
+  }
 
   const onSubmit = async (values: FormValues) => {
     const nextErrors: { spv?: string } = {}
@@ -316,16 +326,34 @@ export function PurchaseRequestPage() {
             mendapatkan nomor referensi otomatis.
           </p>
 
-          <div className="mt-6 flex flex-wrap items-center gap-2">
-            {steps.map((step, index) => (
-              <div key={step.key} className="flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-[11px] font-bold text-primary-800">
-                  {index + 1}
-                </span>
-                <span className="text-xs font-medium text-navy-600">{step.label}</span>
-                {index < steps.length - 1 && <span className="mx-1 h-px w-6 bg-navy-200" />}
-              </div>
-            ))}
+          <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {steps.map((step, index) => {
+              const done = stepDone[step.key as keyof typeof stepDone]
+              return (
+                <div
+                  key={step.key}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors',
+                    done
+                      ? 'border-emerald-200 bg-emerald-50/70'
+                      : 'border-navy-100 bg-white',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold',
+                      done ? 'bg-emerald-600 text-white' : 'bg-primary-50 text-primary-800',
+                    )}
+                  >
+                    {done ? <Check className="h-4 w-4" /> : index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-navy-900">{step.label}</p>
+                    <p className="text-sm text-navy-400">{done ? 'Lengkap' : 'Belum lengkap'}</p>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       </section>
@@ -686,7 +714,7 @@ function SectionHeading({
         {icon}
       </span>
       <div>
-        <h2 className="text-sm font-semibold text-navy-900">
+        <h2 className="text-lg font-semibold tracking-tight text-navy-900">
           {title}
           {required && <span className="ml-0.5 text-destructive">*</span>}
         </h2>

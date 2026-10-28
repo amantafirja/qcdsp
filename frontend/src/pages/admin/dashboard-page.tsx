@@ -16,13 +16,17 @@ import {
   YAxis,
 } from 'recharts'
 import {
+  Archive,
   ArrowRight,
   ArrowUpRight,
+  BadgeCheck,
   BookOpen,
   ClipboardList,
+  Clock3,
   FileText,
   GitMerge,
   Layers,
+  Truck,
 } from 'lucide-react'
 import { useDashboard } from '@/hooks/use-api'
 import { useDocumentTitle } from '@/hooks/use-document-title'
@@ -84,6 +88,49 @@ export function DashboardPage() {
 
   const statCards = [
     {
+      label: 'Total Open PR',
+      value: stats?.total_open ?? 0,
+      icon: ClipboardList,
+      tone: 'bg-primary-50 text-primary-700',
+      hint: 'PR yang masih berjalan',
+      to: '/admin/purchase-requests',
+    },
+    {
+      label: 'Pending Approval',
+      value: stats?.total_pending_approval ?? 0,
+      icon: Clock3,
+      tone: 'bg-amber-50 text-amber-700',
+      hint: 'Menunggu persetujuan manager',
+      to: '/admin/purchase-requests?status=op_manager',
+    },
+    {
+      label: 'Total Approved PR',
+      value: stats?.total_approved ?? 0,
+      icon: BadgeCheck,
+      tone: 'bg-emerald-50 text-emerald-700',
+      hint: 'PO disetujui atau selesai',
+      to: '/admin/purchase-requests?status=po_approve',
+    },
+    {
+      label: 'Outstanding Delivery',
+      value: stats?.total_outstanding_delivery ?? 0,
+      icon: Truck,
+      tone: 'bg-sky-50 text-sky-700',
+      hint: 'PO disetujui, belum diterima',
+      to: '/admin/purchase-requests?status=po_approve',
+    },
+    {
+      label: 'Total Closed PR',
+      value: stats?.total_closed ?? 0,
+      icon: Archive,
+      tone: 'bg-navy-100 text-navy-700',
+      hint: 'Done, reject, atau cancel',
+      to: '/admin/purchase-requests?status=done',
+    },
+  ]
+
+  const knowledgeCards = [
+    {
       label: 'Total Dokumen',
       value: stats?.total_documents ?? 0,
       icon: BookOpen,
@@ -105,25 +152,11 @@ export function DashboardPage() {
       hint: 'Dokumen PDF terunggah',
     },
     {
-      label: 'Total PR Masuk',
-      value: stats?.total_pr ?? 0,
-      icon: ClipboardList,
-      tone: 'bg-emerald-50 text-emerald-700',
-      hint: 'Seluruh PR aktif dan selesai',
-    },
-    {
-      label: 'PR Aktif',
-      value: stats?.total_active ?? 0,
-      icon: Layers,
-      tone: 'bg-sky-50 text-sky-700',
-      hint: 'PR yang masih diproses',
-    },
-    {
       label: 'PR Digabung',
       value: stats?.total_merged ?? 0,
       icon: GitMerge,
       tone: 'bg-violet-50 text-violet-700',
-      hint: 'PR anggota dari PR Utama',
+      hint: 'PR asal yang tergabung ke PR Utama',
     },
   ]
 
@@ -159,59 +192,84 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {statCards.map((card) => (
-          <div key={card.label} className="stat-card">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-navy-400">{card.label}</p>
-                {isLoading ? (
-                  <div className="skeleton mt-2 h-8 w-16" />
-                ) : (
-                  <p className="mt-1 text-2xl font-bold tabular-nums text-navy-900">
-                    {formatNumber(card.value)}
-                  </p>
-                )}
-              </div>
-              <span className={cn('flex h-9 w-9 items-center justify-center rounded-lg', card.tone)}>
-                <card.icon className="h-[18px] w-[18px]" />
-              </span>
-            </div>
-            <p className="mt-2 text-[11px] text-navy-400">{card.hint}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {prStatusCards.map((card) => (
           <Link
-            key={card.status}
-            to={`/admin/purchase-requests?status=${card.status}`}
-            className="group flex items-center gap-2.5 rounded-lg border border-border bg-white p-3 transition-all hover:border-primary-200 hover:shadow-card"
+            key={card.label}
+            to={card.to}
+            className="stat-card group transition-all hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-elevated"
           >
-            <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md border', card.color)}>
-              <ClipboardList className="h-4 w-4" />
+            <span className={cn('flex h-11 w-11 items-center justify-center rounded-xl', card.tone)}>
+              <card.icon className="h-5 w-5" />
             </span>
-            <div className="min-w-0">
-              <p className="truncate text-[11px] font-medium text-navy-400">{card.label}</p>
-              {isLoading ? (
-                <div className="skeleton mt-1 h-5 w-8" />
-              ) : (
-                <p className="text-lg font-bold leading-tight tabular-nums text-navy-900">
-                  {formatNumber(card.value)}
-                </p>
-              )}
-            </div>
+            <p className="mt-4 text-sm font-medium text-navy-500">{card.label}</p>
+            {isLoading ? (
+              <div className="skeleton mt-2 h-9 w-20" />
+            ) : (
+              <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-navy-900 sm:text-4xl">
+                {formatNumber(card.value)}
+              </p>
+            )}
+            <p className="mt-2 text-sm text-navy-400">{card.hint}</p>
           </Link>
         ))}
       </div>
 
+      <div className="surface-card p-5 sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="section-title">Status Purchase Request</h3>
+          <Link
+            to="/admin/purchase-requests"
+            className="text-sm font-medium text-primary-700 hover:underline"
+          >
+            Lihat semua PR
+          </Link>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {prStatusCards.map((card) => (
+            <Link
+              key={card.status}
+              to={`/admin/purchase-requests?status=${card.status}`}
+              className="flex items-center gap-3 rounded-xl border border-transparent bg-navy-50/60 p-3.5 transition-colors hover:border-primary-200 hover:bg-white"
+            >
+              <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border', card.color)}>
+                <ClipboardList className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-navy-500">{card.label}</p>
+                {isLoading ? (
+                  <div className="skeleton mt-1 h-6 w-10" />
+                ) : (
+                  <p className="text-xl font-bold leading-tight tabular-nums text-navy-900">
+                    {formatNumber(card.value)}
+                  </p>
+                )}
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {knowledgeCards.map((card) => (
+          <div key={card.label} className="surface-card flex items-center gap-3 p-4">
+            <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', card.tone)}>
+              <card.icon className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-navy-500">{card.label}</p>
+              <p className="text-xl font-bold tabular-nums text-navy-900">{formatNumber(card.value)}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="surface-card p-5 lg:col-span-2">
+        <div className="surface-card p-5 lg:col-span-2 sm:p-6">
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-sm font-semibold text-navy-900">Purchase Request per Bulan</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">12 bulan terakhir</p>
+              <h3 className="section-title">Purchase Request per Bulan</h3>
+              <p className="mt-1 text-sm text-muted-foreground">12 bulan terakhir</p>
             </div>
             <Badge variant="secondary">{monthlyData.reduce((sum, item) => sum + item.total, 0)} PR</Badge>
           </div>
@@ -266,7 +324,7 @@ export function DashboardPage() {
         </div>
 
         <div className="surface-card p-5">
-          <h3 className="text-sm font-semibold text-navy-900">Distribusi Status</h3>
+          <h3 className="section-title">Distribusi Status</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">Proporsi PR per status</p>
           <div className="mt-2 h-[280px] w-full">
             {isLoading ? (
@@ -314,7 +372,7 @@ export function DashboardPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="surface-card p-5">
-          <h3 className="text-sm font-semibold text-navy-900">Distribusi Jenis Pemesanan</h3>
+          <h3 className="section-title">Distribusi Jenis Pemesanan</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">Berdasarkan seluruh PR yang masuk</p>
           <div className="mt-4 h-[300px] w-full">
             {isLoading ? (
@@ -356,7 +414,7 @@ export function DashboardPage() {
         <div className="surface-card p-5">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-semibold text-navy-900">Purchase Request Terbaru</h3>
+              <h3 className="section-title">Purchase Request Terbaru</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">5 pengajuan terakhir</p>
             </div>
             <Button asChild variant="ghost" size="sm">

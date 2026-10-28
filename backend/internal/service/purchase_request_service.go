@@ -410,7 +410,7 @@ func (s *purchaseRequestService) Dashboard(ctx context.Context) (*models.Dashboa
 		return nil, err
 	}
 
-	total, active, merged, err := s.requests.PRSummary(ctx)
+	metrics, err := s.requests.PRMetrics(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -422,12 +422,17 @@ func (s *purchaseRequestService) Dashboard(ctx context.Context) (*models.Dashboa
 
 	return &models.DashboardData{
 		Stats: models.DashboardStats{
-			TotalDocuments: totalDocs,
-			TotalArticles:  articles,
-			TotalPDF:       pdfs,
-			TotalPR:        total,
-			TotalActive:    active,
-			TotalMerged:    merged,
+			TotalDocuments:           totalDocs,
+			TotalArticles:            articles,
+			TotalPDF:                 pdfs,
+			TotalPR:                  metrics.Total,
+			TotalOpen:                metrics.Open,
+			TotalPendingApproval:     metrics.PendingApproval,
+			TotalApproved:            metrics.Approved,
+			TotalClosed:              metrics.Closed,
+			TotalOutstandingDelivery: metrics.OutstandingDelivery,
+			TotalActive:              metrics.Open,
+			TotalMerged:              metrics.Merged,
 		},
 		MonthlyPR:     monthly,
 		OrderTypeDist: orderTypes,
