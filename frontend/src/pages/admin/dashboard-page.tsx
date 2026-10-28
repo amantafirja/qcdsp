@@ -109,7 +109,7 @@ export function DashboardPage() {
       icon: BadgeCheck,
       tone: 'bg-emerald-50 text-emerald-700',
       hint: 'PO disetujui atau selesai',
-      to: '/admin/purchase-requests?status=po_approve',
+      to: '/admin/purchase-requests',
     },
     {
       label: 'Outstanding Delivery',
@@ -125,7 +125,7 @@ export function DashboardPage() {
       icon: Archive,
       tone: 'bg-navy-100 text-navy-700',
       hint: 'Done, reject, atau cancel',
-      to: '/admin/purchase-requests?status=done',
+      to: '/admin/purchase-requests',
     },
   ]
 
