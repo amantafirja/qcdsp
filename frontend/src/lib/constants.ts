@@ -28,10 +28,11 @@ export type PRStatus = (typeof PR_STATUSES)[number]
 
 export const STATUS_META: Record<
   PRStatus,
-  { label: string; description: string; badge: string; dot: string; chart: string }
+  { label: string; short: string; description: string; badge: string; dot: string; chart: string }
 > = {
   form_created: {
     label: 'Form Dibuat',
+    short: 'Form Dibuat',
     description: 'Purchase Request dibuat dan menunggu proses purchasing.',
     badge: 'border-slate-200 bg-slate-100 text-slate-700',
     dot: 'bg-slate-400',
@@ -39,6 +40,7 @@ export const STATUS_META: Record<
   },
   op_penawaran: {
     label: 'OP Penawaran Purchasing',
+    short: 'Penawaran',
     description: 'Purchasing sedang memproses permintaan penawaran ke vendor.',
     badge: 'border-amber-200 bg-amber-50 text-amber-700',
     dot: 'bg-amber-500',
@@ -46,6 +48,7 @@ export const STATUS_META: Record<
   },
   op_proposal: {
     label: 'OP Proposal',
+    short: 'Proposal',
     description: 'Proposal penawaran sedang disusun.',
     badge: 'border-violet-200 bg-violet-50 text-violet-700',
     dot: 'bg-violet-500',
@@ -53,6 +56,7 @@ export const STATUS_META: Record<
   },
   op_manager: {
     label: 'OP Manager',
+    short: 'OP Manager',
     description: 'Proposal menunggu persetujuan manager.',
     badge: 'border-indigo-200 bg-indigo-50 text-indigo-700',
     dot: 'bg-indigo-500',
@@ -60,6 +64,7 @@ export const STATUS_META: Record<
   },
   pending_po: {
     label: 'Pending PO',
+    short: 'Pending PO',
     description: 'Menunggu penerbitan Purchase Order.',
     badge: 'border-blue-200 bg-blue-50 text-blue-700',
     dot: 'bg-blue-500',
@@ -67,6 +72,7 @@ export const STATUS_META: Record<
   },
   po_approve: {
     label: 'PO Approve',
+    short: 'PO Approve',
     description: 'Purchase Order telah disetujui dan diproses ke vendor.',
     badge: 'border-sky-200 bg-sky-50 text-sky-700',
     dot: 'bg-sky-500',
@@ -74,6 +80,7 @@ export const STATUS_META: Record<
   },
   done: {
     label: 'Selesai (Done)',
+    short: 'Selesai',
     description: 'Pengadaan selesai dan barang sudah diterima.',
     badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     dot: 'bg-emerald-500',
@@ -81,6 +88,7 @@ export const STATUS_META: Record<
   },
   rejected: {
     label: 'Selesai (Reject)',
+    short: 'Reject',
     description: 'Pengajuan ditolak dan proses dihentikan.',
     badge: 'border-rose-200 bg-rose-50 text-rose-700',
     dot: 'bg-rose-500',
@@ -88,6 +96,7 @@ export const STATUS_META: Record<
   },
   cancelled: {
     label: 'Selesai (Cancel)',
+    short: 'Cancel',
     description: 'Pengajuan dibatalkan dan proses dihentikan.',
     badge: 'border-navy-200 bg-navy-50 text-navy-700',
     dot: 'bg-navy-500',

@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import { BrandMarkLight } from '@/components/shared/brand-mark'
+import { AppearanceMenu } from '@/components/shared/appearance-menu'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -169,10 +170,10 @@ export function AdminLayout() {
   )
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-40 hidden bg-navy-900 transition-all duration-200 lg:block',
+          'sidebar-glass fixed inset-y-0 left-0 z-40 hidden transition-all duration-200 lg:block',
           collapsed ? 'w-[72px]' : 'w-[264px]',
         )}
       >
@@ -194,7 +195,7 @@ export function AdminLayout() {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-navy-950/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-[280px] animate-slide-in bg-navy-900 shadow-2xl">
+          <aside className="sidebar-glass absolute inset-y-0 left-0 w-[280px] animate-slide-in shadow-2xl">
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
@@ -209,7 +210,7 @@ export function AdminLayout() {
       )}
 
       <div className={cn('transition-all duration-200', collapsed ? 'lg:pl-[72px]' : 'lg:pl-[264px]')}>
-        <header className="sticky top-0 z-30 border-b border-border bg-white/95 backdrop-blur">
+        <header className="glass-panel sticky top-0 z-30">
           <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
               <Button
@@ -228,6 +229,7 @@ export function AdminLayout() {
             </div>
 
             <div className="flex items-center gap-2">
+              <AppearanceMenu />
               <Button asChild variant="outline" size="sm" className="hidden md:inline-flex">
                 <Link to="/">
                   <ExternalLink className="h-3.5 w-3.5" />

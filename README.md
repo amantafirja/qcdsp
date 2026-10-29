@@ -153,9 +153,23 @@ Format: `PRG/1GQ01/MMYY/XXXXX`
 
 - Font **Inter** dengan ukuran teks minimum **14px**; isi tabel 14-15px; judul section 18-24px.
 - Warna netral (putih/abu muda) dengan aksen biru perusahaan, border tipis, card layout, dan whitespace lega.
+- **Liquid glass**: kartu, header, sidebar, dialog, dropdown, dan select memakai permukaan semi-transparan dengan `backdrop-filter` (blur + saturasi) di atas latar ambient gradient.
 - Dashboard memakai 5 kartu statistik besar dengan ikon; status PR ditampilkan sebagai kartu ringkas.
 - Form PR dibagi menjadi 4 langkah (Deskripsi, Item & Jenis, Pemesan, Lampiran) dengan indikator kelengkapan.
 - Responsif: kartu menyesuaikan grid, tabel dapat di-scroll horizontal pada layar kecil.
+
+### Appearance (tema & efek kaca)
+
+Menu **Tampilan** tersedia di header admin dan header publik:
+
+| Kontrol | Fungsi |
+|---------|--------|
+| Terang / Gelap | Mengganti mode warna; tersimpan di `localStorage` (`qcdsp:theme-mode`) dan menghormati `prefers-color-scheme` saat pertama kali dibuka |
+| Slider Efek kaca (0-100%) | Mengatur transparansi & blur permukaan glass; nilai dipetakan ke CSS variable `--glass-alpha`, `--glass-blur`, `--glass-border-alpha` dan disimpan di `qcdsp:glass-intensity` |
+| Preset Solid / Seimbang / Transparan | Nilai cepat 10% / 60% / 100% |
+
+- Nilai `0%` menghasilkan permukaan hampir solid; `100%` menghasilkan kaca paling transparan dengan blur maksimum.
+- Seluruh token warna memakai CSS variable sehingga dark mode konsisten tanpa mengubah komponen satu per satu.
 
 ---
 

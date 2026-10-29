@@ -26,7 +26,7 @@ import { useDocumentTitle } from '@/hooks/use-document-title'
 import { SearchInput } from '@/components/shared/search-input'
 import { PaginationBar } from '@/components/shared/pagination-bar'
 import { EmptyState, ErrorState } from '@/components/shared/empty-state'
-import { StatusBadge } from '@/components/shared/status-badge'
+import { ProgressBadge } from '@/components/shared/status-badge'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -422,43 +422,41 @@ export function PurchaseRequestManagementPage() {
                             {pr.description}
                           </p>
                         ) : (
-                          <ul className="space-y-1.5">
+                          <ul className="space-y-2">
                             {pr.items.slice(0, 4).map((item) => (
-                              <li key={item.id} className="flex items-start gap-2 text-sm leading-snug">
-                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary-400" />
-                                <span className="min-w-0">
-                                  <span className="font-medium text-navy-900">{item.item_name}</span>
-                                  <span className="text-navy-500">
-                                    {' '}
-                                    · {item.quantity} {item.unit}
+                              <li key={item.id} className="min-w-0">
+                                <p className="font-medium leading-snug text-navy-900">{item.item_name}</p>
+                                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-navy-500">
+                                  <span className="tabular-nums">
+                                    {item.quantity} {item.unit}
                                   </span>
                                   {!item.origin_is_master && (
-                                    <span className="ml-1.5 inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                                    <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 font-medium text-primary-700">
                                       dari {item.origin_reference}
                                     </span>
                                   )}
-                                </span>
+                                </p>
                               </li>
                             ))}
                             {pr.items.length > 4 && (
-                              <li className="pl-3.5 text-sm text-navy-400">
+                              <li className="text-sm text-navy-400">
                                 +{pr.items.length - 4} item lainnya
                               </li>
                             )}
                           </ul>
                         )}
-                        <p className="mt-1.5 pl-3.5 text-sm text-navy-400">
+                        <p className="mt-2 text-sm text-navy-400">
                           {pr.items.length} item · total{' '}
                           {pr.items.reduce((sum, item) => sum + item.quantity, 0)}
                         </p>
                       </TableCell>
                       <TableCell className="pt-4">
-                        <span className="inline-block rounded-lg bg-navy-50 px-2.5 py-1 text-sm font-medium text-navy-700">
+                        <span className="inline-block whitespace-nowrap rounded-lg bg-navy-50 px-2.5 py-1 text-sm font-medium text-navy-700">
                           {pr.order_type === 'Lain-Lain' ? pr.custom_order_type ?? pr.order_type : pr.order_type}
                         </span>
                       </TableCell>
                       <TableCell className="pt-4">
-                        <StatusBadge status={pr.status} />
+                        <ProgressBadge status={pr.status} />
                         {pr.po_manual_override && (
                           <p className="mt-1.5 text-sm text-amber-700">PO manual</p>
                         )}

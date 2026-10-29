@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { ChevronDown, ClipboardList, FileSearch, Menu, Search, ShieldCheck, X } from 'lucide-react'
 import { BrandMark } from '@/components/shared/brand-mark'
+import { AppearanceMenu } from '@/components/shared/appearance-menu'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -31,8 +32,8 @@ export function PublicHeader() {
   return (
     <header
       className={cn(
-        'sticky top-0 z-40 border-b bg-white/95 backdrop-blur transition-shadow',
-        scrolled ? 'border-navy-100 shadow-sm' : 'border-transparent',
+        'glass-panel sticky top-0 z-40 transition-shadow',
+        scrolled ? 'shadow-sm' : '',
       )}
     >
       <div className="page-shell flex h-16 items-center justify-between gap-4">
@@ -59,6 +60,7 @@ export function PublicHeader() {
         </nav>
 
         <div className="flex items-center gap-2">
+          <AppearanceMenu compact />
           <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
             <Link to="/knowledge">
               <Search className="h-4 w-4" />

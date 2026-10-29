@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { AuthProvider } from '@/contexts/auth-context'
+import { AppearanceProvider } from '@/contexts/appearance-context'
 import { ProtectedRoute } from '@/components/shared/protected-route'
 import { RequireRole } from '@/components/shared/require-role'
 import { PublicLayout } from '@/components/layout/public-layout-wrapper'
@@ -35,8 +36,9 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AuthProvider>
+      <AppearanceProvider>
+        <BrowserRouter>
+          <AuthProvider>
           <Routes>
             <Route element={<PublicLayout />}>
               <Route path="/" element={<GatewayPage />} />
@@ -128,7 +130,8 @@ export default function App() {
             }}
           />
         </AuthProvider>
-      </BrowserRouter>
+        </BrowserRouter>
+      </AppearanceProvider>
     </QueryClientProvider>
   )
 }
