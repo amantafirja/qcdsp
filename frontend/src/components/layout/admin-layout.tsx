@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import {
   ChevronLeft,
   ClipboardList,
+  Database,
   ExternalLink,
   FolderTree,
   LayoutDashboard,
@@ -46,6 +47,12 @@ const adminNav: Array<{
     roles: ['super_admin', 'admin', 'pr_viewer'],
   },
   {
+    label: 'Oracle Sync',
+    to: '/admin/oracle',
+    icon: Database,
+    roles: ['super_admin', 'admin'],
+  },
+  {
     label: 'Knowledge Management',
     to: '/admin/knowledge',
     icon: ClipboardList,
@@ -66,6 +73,7 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
   '/admin/knowledge/new': { title: 'Tambah Dokumen', subtitle: 'Buat konten PDF atau artikel baru' },
   '/admin/categories': { title: 'Category Management', subtitle: 'Kelola kategori dokumen Knowledge Center' },
   '/admin/purchase-requests': { title: 'Purchase Request', subtitle: 'Kelola dan tindak lanjuti pengajuan PR' },
+  '/admin/oracle': { title: 'Oracle Sync', subtitle: 'Sinkronisasi data PO dari file export Oracle' },
   '/admin/accounts': { title: 'Account Management', subtitle: 'Kelola akun admin dan hak aksesnya' },
 }
 

@@ -55,12 +55,14 @@ func main() {
 	categoryRepo := repository.NewCategoryRepository(db)
 	knowledgeRepo := repository.NewKnowledgeRepository(db)
 	prRepo := repository.NewPurchaseRequestRepository(db)
+	oracleRepo := repository.NewOracleRepository(db)
 
 	authService := service.NewAuthService(adminRepo, tokens)
 	adminService := service.NewAdminService(adminRepo)
 	categoryService := service.NewCategoryService(categoryRepo)
 	knowledgeService := service.NewKnowledgeService(knowledgeRepo, categoryRepo, cfg.UploadDir)
 	prService := service.NewPurchaseRequestService(prRepo, knowledgeRepo, cfg.UploadDir)
+	oracleService := service.NewOracleService(oracleRepo)
 
 	handlers := router.Handlers{
 		Auth:            handler.NewAuthHandler(authService),
@@ -69,6 +71,7 @@ func main() {
 		Knowledge:       handler.NewKnowledgeHandler(knowledgeService, cfg.UploadDir, cfg.MaxUploadBytes()),
 		PurchaseRequest: handler.NewPurchaseRequestHandler(prService, cfg.UploadDir, cfg.MaxUploadBytes()),
 		File:            handler.NewFileHandler(knowledgeService, cfg.UploadDir, cfg.MaxUploadBytes()),
+		Oracle:          handler.NewOracleHandler(oracleService),
 	}
 
 	engine := router.New(handlers, tokens, adminRepo, cfg.CORSAllowedHosts, cfg.MaxUploadBytes())

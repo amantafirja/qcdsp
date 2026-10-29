@@ -28,3 +28,9 @@ Thumbs.db
 
 # Kilo
 .kilo/
+
+# Excel
+*.xlsx
+*.xls
+*.xlsm
+*.csv

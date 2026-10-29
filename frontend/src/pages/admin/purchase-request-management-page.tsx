@@ -60,7 +60,7 @@ import {
 } from '@/components/ui/table'
 import { ORDER_TYPES, PR_STATUSES, STATUS_META, isTerminalStatus, type PRStatus } from '@/lib/constants'
 import { buildBulkCopyText, buildPRCopyText, copyText } from '@/lib/copy-pr'
-import { formatDate } from '@/lib/format'
+import { formatDate, formatNumber } from '@/lib/format'
 import { exportPurchaseRequestsToExcel } from '@/lib/export-excel'
 import type { PurchaseRequest } from '@/types'
 
@@ -359,7 +359,7 @@ export function PurchaseRequestManagementPage() {
           </div>
         ) : (
           <>
-            <Table className="min-w-[880px]">
+            <Table className="min-w-[1320px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-12">
@@ -371,11 +371,15 @@ export function PurchaseRequestManagementPage() {
                         aria-label="Pilih semua PR"
                       />
                     </TableHead>
-                    <TableHead className="w-[140px]">Tanggal</TableHead>
+                    <TableHead className="w-[140px]">Tanggal PR</TableHead>
                     <TableHead className="min-w-[200px]">Referensi &amp; Pemesan</TableHead>
                     <TableHead className="min-w-[320px]">Item</TableHead>
                     <TableHead className="w-[150px]">Jenis</TableHead>
-                    <TableHead className="w-[190px]">Status</TableHead>
+                    <TableHead className="w-[190px]">Progress</TableHead>
+                    <TableHead className="w-[150px]">Tanggal PO</TableHead>
+                    <TableHead className="w-[200px]">No PO</TableHead>
+                    <TableHead className="w-[150px] text-right">Harga</TableHead>
+                    <TableHead className="w-[160px]">Est. Datang</TableHead>
                     <TableHead className="w-[130px] text-right">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -455,6 +459,34 @@ export function PurchaseRequestManagementPage() {
                       </TableCell>
                       <TableCell className="pt-4">
                         <StatusBadge status={pr.status} />
+                        {pr.po_manual_override && (
+                          <p className="mt-1.5 text-sm text-amber-700">PO manual</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap pt-4 text-sm text-navy-700">
+                        {pr.po_date ? formatDate(pr.po_date, 'dd MMM yyyy') : '-'}
+                      </TableCell>
+                      <TableCell className="pt-4">
+                        {pr.po_number ? (
+                          <span className="font-mono text-sm font-medium text-navy-800">
+                            {pr.po_number}
+                            {pr.po_list && pr.po_list.length > 1 && (
+                              <span className="ml-1 text-navy-500">
+                                (+{pr.po_list.length - 1} PO lainnya)
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-navy-400">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap pt-4 text-right text-sm tabular-nums text-navy-800">
+                        {pr.po_value != null ? formatNumber(pr.po_value) : '-'}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap pt-4 text-sm text-navy-700">
+                        {pr.delivery_estimate_date
+                          ? formatDate(pr.delivery_estimate_date, 'dd MMM yyyy')
+                          : '-'}
                       </TableCell>
                       <TableCell className="pt-4">
                         <div className="flex items-center justify-end gap-1">

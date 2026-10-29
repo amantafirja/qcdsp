@@ -147,8 +147,141 @@ export interface PurchaseRequest {
   is_merged: boolean
   merged_at: string | null
   deleted_at: string | null
+  po_number: string | null
+  po_date: string | null
+  po_value: number | null
+  delivery_estimate_date: string | null
+  oracle_synced_at: string | null
+  po_list: OraclePO[] | null
+  po_source: string
+  po_manual_override: boolean
+  oracle_sync_status: string | null
+  oracle_last_sync_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface OraclePO {
+  po_number: string
+  po_date: string | null
+  delivery_date: string | null
+  total_value: number | null
+  line_count: number
+  items: string[] | null
+}
+
+export interface OracleImport {
+  id: string
+  file_name: string
+  uploaded_by: string | null
+  uploaded_by_name: string
+  total_rows: number
+  total_pr: number
+  matched_count: number
+  synced_count: number
+  status: string
+  notes: string | null
+  created_at: string
+  synced_at: string | null
+  duplicate_rows: number
+  multi_line_prs: number
+  multi_po_prs: number
+  needs_review_prs: number
+  not_found_prs: number
+  updated_prs: number
+  file_size: number
+  sync_count: number
+}
+
+export interface OracleRow {
+  id: string
+  import_id: string
+  pr_number: string
+  po_number: string | null
+  po_date: string | null
+  total_value: number | null
+  delivery_date: string | null
+  line_count: number
+  qty_total: number
+  item_summary: string | null
+  po_list: OraclePO[] | null
+  duplicate_lines: number
+  multi_line: boolean
+  multi_po: boolean
+  needs_review: boolean
+  sync_status: string | null
+  matched_pr_id: string | null
+  matched_pr_reference: string | null
+  pr_status: string | null
+  created_at: string
+}
+
+export interface OracleSyncLog {
+  id: string
+  import_id: string
+  file_name: string
+  actor_id: string | null
+  actor_name: string
+  actor_role: string
+  trigger: string
+  total_rows: number
+  total_pr: number
+  matched: number
+  not_found: number
+  updated: number
+  duplicates: number
+  multi_line: number
+  multi_po: number
+  needs_review: number
+  skipped_manual: number
+  status_changed: number
+  started_at: string
+  finished_at: string | null
+}
+
+export interface OracleStatus {
+  last_import: OracleImport | null
+  total_rows: number
+  total_pr: number
+  matched_count: number
+  unmatched_count: number
+  with_po: number
+  without_po: number
+  duplicate_rows: number
+  multi_line_prs: number
+  multi_po_prs: number
+  needs_review_prs: number
+  total_value: number
+  rows: OracleRow[]
+  imports: OracleImport[]
+  sync_logs: OracleSyncLog[]
+}
+
+export interface OracleSyncDetail {
+  pr_number: string
+  pr_reference: string | null
+  po_number: string | null
+  total_value: number | null
+  delivery_date: string | null
+  matched: boolean
+  updated: boolean
+  multi_po: boolean
+  status: string
+  message: string
+}
+
+export interface OracleSyncResult {
+  import_id: string
+  matched: number
+  updated: number
+  status_changed: number
+  not_found: number
+  duplicates: number
+  multi_po: number
+  needs_review: number
+  skipped_manual: number
+  skipped_terminal: number
+  details: OracleSyncDetail[]
 }
 
 export interface PRAuditLog {

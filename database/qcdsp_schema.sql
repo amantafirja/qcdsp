@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 4AdY92CjcGi4uCCflagx59iEkeufbPnqqhtgSYX2atm8WfbqAmcXAVktjWMikQM
+\restrict fnLuw8GuU37OhkFohfpu9gmVmel5W6bbXwsPezjpi33OM4EgfcQD9pWZFcmSchN
 
 -- Dumped from database version 18.6
 -- Dumped by pg_dump version 18.6
@@ -131,6 +131,89 @@ CREATE TABLE public.knowledge_documents (
 
 
 --
+-- Name: oracle_imports; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oracle_imports (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    file_name character varying(255) NOT NULL,
+    uploaded_by uuid,
+    uploaded_by_name character varying(150) DEFAULT ''::character varying NOT NULL,
+    total_rows integer DEFAULT 0 NOT NULL,
+    total_pr integer DEFAULT 0 NOT NULL,
+    matched_count integer DEFAULT 0 NOT NULL,
+    synced_count integer DEFAULT 0 NOT NULL,
+    status character varying(30) DEFAULT 'uploaded'::character varying NOT NULL,
+    notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    synced_at timestamp with time zone,
+    duplicate_rows integer DEFAULT 0 NOT NULL,
+    multi_line_prs integer DEFAULT 0 NOT NULL,
+    multi_po_prs integer DEFAULT 0 NOT NULL,
+    needs_review_prs integer DEFAULT 0 NOT NULL,
+    not_found_prs integer DEFAULT 0 NOT NULL,
+    updated_prs integer DEFAULT 0 NOT NULL,
+    file_size bigint DEFAULT 0 NOT NULL,
+    sync_count integer DEFAULT 0 NOT NULL
+);
+
+
+--
+-- Name: oracle_purchase_orders; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oracle_purchase_orders (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    import_id uuid NOT NULL,
+    pr_number character varying(80) NOT NULL,
+    po_number character varying(80),
+    po_date date,
+    total_value numeric(18,2),
+    delivery_date date,
+    line_count integer DEFAULT 0 NOT NULL,
+    qty_total numeric(18,2) DEFAULT 0 NOT NULL,
+    item_summary text,
+    raw_data jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    po_list jsonb,
+    duplicate_lines integer DEFAULT 0 NOT NULL,
+    multi_line boolean DEFAULT false NOT NULL,
+    multi_po boolean DEFAULT false NOT NULL,
+    needs_review boolean DEFAULT false NOT NULL,
+    sync_status character varying(30)
+);
+
+
+--
+-- Name: oracle_sync_logs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oracle_sync_logs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    import_id uuid NOT NULL,
+    file_name character varying(255) NOT NULL,
+    actor_id uuid,
+    actor_name character varying(150) DEFAULT ''::character varying NOT NULL,
+    actor_role character varying(30) DEFAULT 'admin'::character varying NOT NULL,
+    trigger character varying(30) DEFAULT 'manual'::character varying NOT NULL,
+    total_rows integer DEFAULT 0 NOT NULL,
+    total_pr integer DEFAULT 0 NOT NULL,
+    matched integer DEFAULT 0 NOT NULL,
+    not_found integer DEFAULT 0 NOT NULL,
+    updated integer DEFAULT 0 NOT NULL,
+    duplicates integer DEFAULT 0 NOT NULL,
+    multi_line integer DEFAULT 0 NOT NULL,
+    multi_po integer DEFAULT 0 NOT NULL,
+    needs_review integer DEFAULT 0 NOT NULL,
+    skipped_manual integer DEFAULT 0 NOT NULL,
+    status_changed integer DEFAULT 0 NOT NULL,
+    result_data jsonb,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone
+);
+
+
+--
 -- Name: pr_number_counters; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -213,6 +296,16 @@ CREATE TABLE public.purchase_requests (
     merged_by uuid,
     deleted_at timestamp with time zone,
     deleted_by uuid,
+    po_number character varying(80),
+    po_date date,
+    po_value numeric(18,2),
+    delivery_estimate_date date,
+    oracle_synced_at timestamp with time zone,
+    po_list jsonb,
+    po_source character varying(20) DEFAULT 'oracle'::character varying NOT NULL,
+    po_manual_override boolean DEFAULT false NOT NULL,
+    oracle_sync_status character varying(30),
+    oracle_last_sync_at timestamp with time zone,
     CONSTRAINT chk_pr_custom_order_type CHECK ((((order_type)::text <> 'Lain-Lain'::text) OR ((custom_order_type IS NOT NULL) AND (length(btrim((custom_order_type)::text)) > 0)))),
     CONSTRAINT purchase_requests_order_type_check CHECK (((order_type)::text = ANY (ARRAY[('Reagen'::character varying)::text, ('Tools'::character varying)::text, ('Expense Item'::character varying)::text, ('Reagen Mikro'::character varying)::text, ('Tools Mikro'::character varying)::text, ('RS/Reference Standard'::character varying)::text, ('Gas'::character varying)::text, ('Analisa External'::character varying)::text, ('Lain-Lain'::character varying)::text]))),
     CONSTRAINT purchase_requests_status_check CHECK (((status)::text = ANY ((ARRAY['form_created'::character varying, 'op_penawaran'::character varying, 'op_proposal'::character varying, 'op_manager'::character varying, 'pending_po'::character varying, 'po_approve'::character varying, 'done'::character varying, 'rejected'::character varying, 'cancelled'::character varying])::text[])))
@@ -291,6 +384,30 @@ ALTER TABLE ONLY public.knowledge_documents
 
 ALTER TABLE ONLY public.knowledge_documents
     ADD CONSTRAINT knowledge_documents_slug_key UNIQUE (slug);
+
+
+--
+-- Name: oracle_imports oracle_imports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oracle_imports
+    ADD CONSTRAINT oracle_imports_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oracle_purchase_orders oracle_purchase_orders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oracle_purchase_orders
+    ADD CONSTRAINT oracle_purchase_orders_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oracle_sync_logs oracle_sync_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oracle_sync_logs
+    ADD CONSTRAINT oracle_sync_logs_pkey PRIMARY KEY (id);
 
 
 --
@@ -420,6 +537,41 @@ CREATE INDEX idx_knowledge_search ON public.knowledge_documents USING gin (searc
 
 
 --
+-- Name: idx_oracle_imports_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oracle_imports_created ON public.oracle_imports USING btree (created_at DESC);
+
+
+--
+-- Name: idx_oracle_po_import; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oracle_po_import ON public.oracle_purchase_orders USING btree (import_id);
+
+
+--
+-- Name: idx_oracle_po_pr_number; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oracle_po_pr_number ON public.oracle_purchase_orders USING btree (pr_number);
+
+
+--
+-- Name: idx_oracle_po_sync_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oracle_po_sync_status ON public.oracle_purchase_orders USING btree (sync_status);
+
+
+--
+-- Name: idx_oracle_sync_logs_started; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oracle_sync_logs_started ON public.oracle_sync_logs USING btree (started_at DESC);
+
+
+--
 -- Name: idx_pr_audit_action; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -473,6 +625,27 @@ CREATE INDEX idx_pr_items_request_id ON public.purchase_request_items USING btre
 --
 
 CREATE INDEX idx_pr_master_pr_id ON public.purchase_requests USING btree (master_pr_id);
+
+
+--
+-- Name: idx_pr_oracle_sync_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_oracle_sync_status ON public.purchase_requests USING btree (oracle_sync_status);
+
+
+--
+-- Name: idx_pr_po_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_po_date ON public.purchase_requests USING btree (po_date);
+
+
+--
+-- Name: idx_pr_po_number; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pr_po_number ON public.purchase_requests USING btree (po_number);
 
 
 --
@@ -563,6 +736,38 @@ ALTER TABLE ONLY public.knowledge_documents
 
 
 --
+-- Name: oracle_imports oracle_imports_uploaded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oracle_imports
+    ADD CONSTRAINT oracle_imports_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES public.admin_users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: oracle_purchase_orders oracle_purchase_orders_import_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oracle_purchase_orders
+    ADD CONSTRAINT oracle_purchase_orders_import_id_fkey FOREIGN KEY (import_id) REFERENCES public.oracle_imports(id) ON DELETE CASCADE;
+
+
+--
+-- Name: oracle_sync_logs oracle_sync_logs_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oracle_sync_logs
+    ADD CONSTRAINT oracle_sync_logs_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.admin_users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: oracle_sync_logs oracle_sync_logs_import_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oracle_sync_logs
+    ADD CONSTRAINT oracle_sync_logs_import_id_fkey FOREIGN KEY (import_id) REFERENCES public.oracle_imports(id) ON DELETE CASCADE;
+
+
+--
 -- Name: purchase_request_audit_logs purchase_request_audit_logs_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -630,5 +835,5 @@ ALTER TABLE ONLY public.purchase_requests
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 4AdY92CjcGi4uCCflagx59iEkeufbPnqqhtgSYX2atm8WfbqAmcXAVktjWMikQM
+\unrestrict fnLuw8GuU37OhkFohfpu9gmVmel5W6bbXwsPezjpi33OM4EgfcQD9pWZFcmSchN
 

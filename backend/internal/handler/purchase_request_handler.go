@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"qcdsp/backend/internal/models"
 	"qcdsp/backend/internal/service"
 	"qcdsp/backend/internal/utils"
 
@@ -244,6 +245,66 @@ func (h *PurchaseRequestHandler) Update(c *gin.Context) {
 		return
 	}
 	utils.OK(c, "Catatan internal berhasil disimpan", pr)
+}
+
+type updatePOPayload struct {
+	PONumber             *string `json:"po_number"`
+	PODate               *string `json:"po_date"`
+	POValue              *float64 `json:"po_value"`
+	DeliveryEstimateDate *string `json:"delivery_estimate_date"`
+}
+
+func (h *PurchaseRequestHandler) UpdatePO(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequest(c, "ID Purchase Request tidak valid", nil)
+		return
+	}
+
+	var payload updatePOPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		utils.BadRequest(c, "Data PO tidak valid", nil)
+		return
+	}
+
+	input := models.POManualInput{PONumber: payload.PONumber, POValue: payload.POValue}
+	if payload.PODate != nil && strings.TrimSpace(*payload.PODate) != "" {
+		parsed, err := time.Parse("2006-01-02", strings.TrimSpace(*payload.PODate))
+		if err != nil {
+			utils.BadRequest(c, "Tanggal PO tidak valid", gin.H{"po_date": "Format tanggal harus YYYY-MM-DD"})
+			return
+		}
+		input.PODate = &parsed
+	}
+	if payload.DeliveryEstimateDate != nil && strings.TrimSpace(*payload.DeliveryEstimateDate) != "" {
+		parsed, err := time.Parse("2006-01-02", strings.TrimSpace(*payload.DeliveryEstimateDate))
+		if err != nil {
+			utils.BadRequest(c, "Tanggal estimasi datang tidak valid", gin.H{"delivery_estimate_date": "Format tanggal harus YYYY-MM-DD"})
+			return
+		}
+		input.DeliveryEstimateDate = &parsed
+	}
+
+	pr, err := h.requests.UpdatePO(c.Request.Context(), id, input, currentActor(c))
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+	utils.OK(c, "Data PO berhasil disimpan", pr)
+}
+
+func (h *PurchaseRequestHandler) ResetPOOverride(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequest(c, "ID Purchase Request tidak valid", nil)
+		return
+	}
+	pr, err := h.requests.ResetPOOverride(c.Request.Context(), id, currentActor(c))
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+	utils.OK(c, "Manual override dilepas, data akan mengikuti Oracle", pr)
 }
 
 type mergeRequest struct {

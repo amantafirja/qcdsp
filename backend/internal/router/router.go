@@ -19,6 +19,7 @@ type Handlers struct {
 	Knowledge       *handler.KnowledgeHandler
 	PurchaseRequest *handler.PurchaseRequestHandler
 	File            *handler.FileHandler
+	Oracle          *handler.OracleHandler
 }
 
 func New(handlers Handlers, tokens *utils.TokenManager, admins middleware.AdminLookup, allowedOrigins []string, maxUploadBytes int64) *gin.Engine {
@@ -88,10 +89,21 @@ func New(handlers Handlers, tokens *utils.TokenManager, admins middleware.AdminL
 
 				staff.PUT("/purchase-requests/:id/status", handlers.PurchaseRequest.UpdateStatus)
 				staff.PUT("/purchase-requests/:id", handlers.PurchaseRequest.Update)
+				staff.PUT("/purchase-requests/:id/po", handlers.PurchaseRequest.UpdatePO)
+				staff.POST("/purchase-requests/:id/po/reset", handlers.PurchaseRequest.ResetPOOverride)
 				staff.POST("/purchase-requests/:id/merge", handlers.PurchaseRequest.Merge)
 				staff.POST("/purchase-requests/:id/unmerge", handlers.PurchaseRequest.Unmerge)
 				staff.DELETE("/purchase-requests/:id", handlers.PurchaseRequest.Delete)
 				staff.GET("/purchase-requests/:id/audit", handlers.PurchaseRequest.AuditTrail)
+
+				staff.GET("/oracle", handlers.Oracle.Status)
+				staff.POST("/oracle/upload", handlers.Oracle.Upload)
+				staff.POST("/oracle/upload-sync", handlers.Oracle.UploadAndSync)
+				staff.POST("/oracle/sync", handlers.Oracle.Sync)
+				staff.GET("/oracle/logs", handlers.Oracle.SyncLogs)
+				staff.GET("/oracle/logs/:id", handlers.Oracle.SyncLog)
+				staff.GET("/oracle/logs/:id/download", handlers.Oracle.DownloadResult)
+				staff.DELETE("/oracle", handlers.Oracle.Clear)
 			}
 
 			owner := protected.Group("")

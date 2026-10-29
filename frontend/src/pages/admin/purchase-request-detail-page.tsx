@@ -14,6 +14,9 @@ import {
   Loader2,
   Mail,
   Package,
+  Pencil,
+  Receipt,
+  RotateCcw,
   Save,
   Send,
   ShieldAlert,
@@ -32,6 +35,8 @@ import {
   useUnmergePurchaseRequests,
   useUpdatePRNotes,
   useUpdatePRStatus,
+  useUpdatePurchaseRequestPO,
+  useResetPurchaseRequestPO,
 } from '@/hooks/use-api'
 import { useAuth } from '@/contexts/auth-context'
 import { useDocumentTitle } from '@/hooks/use-document-title'
@@ -42,6 +47,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -72,7 +78,7 @@ import {
   type PRStatus,
 } from '@/lib/constants'
 import { buildPRCopyText, copyText } from '@/lib/copy-pr'
-import { formatDateTime, formatFileSize } from '@/lib/format'
+import { formatDate, formatDateTime, formatFileSize, formatNumber } from '@/lib/format'
 import { downloadProtectedFile, openProtectedFile } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -94,6 +100,8 @@ export function PurchaseRequestDetailPage() {
   const { data: pr, isLoading, isError, refetch } = usePurchaseRequestDetail(id)
   const updateStatusMutation = useUpdatePRStatus()
   const updateNotesMutation = useUpdatePRNotes()
+  const updatePOMutation = useUpdatePurchaseRequestPO()
+  const resetPOMutation = useResetPurchaseRequestPO()
   const mergeMutation = useMergePurchaseRequests()
   const unmergeMutation = useUnmergePurchaseRequests()
   const deleteMutation = useDeletePurchaseRequest()
@@ -107,6 +115,8 @@ export function PurchaseRequestDetailPage() {
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false)
   const [memberIds, setMemberIds] = useState<string[]>([])
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [poDialogOpen, setPODialogOpen] = useState(false)
+  const [poForm, setPOForm] = useState({ po_number: '', po_date: '', po_value: '', delivery_estimate_date: '' })
 
   const { data: auditLogs, isLoading: auditLoading } = usePRAudit(id, canEdit)
 
@@ -217,6 +227,48 @@ export function PurchaseRequestDetailPage() {
       toast.success('Penggabungan Purchase Request dibatalkan')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Gagal membatalkan penggabungan')
+    }
+  }
+
+  const openPODialog = () => {
+    setPOForm({
+      po_number: pr.po_number ?? '',
+      po_date: pr.po_date ? pr.po_date.slice(0, 10) : '',
+      po_value: pr.po_value != null ? String(pr.po_value) : '',
+      delivery_estimate_date: pr.delivery_estimate_date
+        ? pr.delivery_estimate_date.slice(0, 10)
+        : '',
+    })
+    setPODialogOpen(true)
+  }
+
+  const handleSavePO = async () => {
+    const value = poForm.po_value.trim() === '' ? null : Number(poForm.po_value.replace(/[^\d.-]/g, ''))
+    if (value !== null && Number.isNaN(value)) {
+      toast.error('Harga harus berupa angka')
+      return
+    }
+    try {
+      await updatePOMutation.mutateAsync({
+        id: pr.id,
+        po_number: poForm.po_number.trim() || null,
+        po_date: poForm.po_date || null,
+        po_value: value,
+        delivery_estimate_date: poForm.delivery_estimate_date || null,
+      })
+      toast.success('Data PO berhasil disimpan')
+      setPODialogOpen(false)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal menyimpan data PO')
+    }
+  }
+
+  const handleResetOverride = async () => {
+    try {
+      await resetPOMutation.mutateAsync(pr.id)
+      toast.success('Data PO akan mengikuti Oracle pada sinkronisasi berikutnya')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal melepas manual override')
     }
   }
 
@@ -346,6 +398,85 @@ export function PurchaseRequestDetailPage() {
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
+          <section className="surface-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 className="section-title flex items-center gap-2">
+                  <Receipt className="h-4 w-4 text-navy-400" />
+                  Data Purchasing (Oracle)
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Data PO terisi otomatis dari file Oracle. Admin dapat mengubah manual bila diperlukan.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={pr.po_manual_override ? 'warning' : 'info'}>
+                  {pr.po_manual_override ? 'Sumber: Manual' : 'Sumber: Oracle'}
+                </Badge>
+                {canEdit && (
+                  <Button variant="outline" size="sm" onClick={openPODialog}>
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit PO
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+              <InfoField label="No PO" value={pr.po_number ?? '-'} />
+              <InfoField label="Tanggal PO" value={pr.po_date ? formatDate(pr.po_date, 'dd MMM yyyy') : '-'} />
+              <InfoField label="Harga" value={pr.po_value != null ? `Rp ${formatNumber(pr.po_value)}` : '-'} />
+              <InfoField
+                label="Tanggal Estimasi Datang"
+                value={pr.delivery_estimate_date ? formatDate(pr.delivery_estimate_date, 'dd MMM yyyy') : '-'}
+              />
+            </dl>
+
+            {(pr.po_list ?? []).length > 1 && (
+              <div className="mt-4">
+                <p className="text-sm font-semibold text-navy-900">Daftar PO ({(pr.po_list ?? []).length})</p>
+                <div className="mt-2 space-y-2">
+                  {(pr.po_list ?? []).map((po) => (
+                    <div
+                      key={po.po_number || 'tanpa-po'}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-navy-100 bg-navy-50/40 p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm font-semibold text-navy-900">
+                          {po.po_number || '(tanpa PO)'}
+                        </p>
+                        <p className="text-sm text-navy-500">
+                          {po.po_date ? formatDate(po.po_date, 'dd MMM yyyy') : '-'} · {po.line_count} baris · est.
+                          datang {po.delivery_date ? formatDate(po.delivery_date, 'dd MMM yyyy') : '-'}
+                        </p>
+                      </div>
+                      <p className="text-sm font-semibold text-navy-900">
+                        {po.total_value != null ? `Rp ${formatNumber(po.total_value)}` : '-'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {pr.po_manual_override && canEdit && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                <p className="text-sm text-amber-900">
+                  Data PO diubah manual. Sinkronisasi Oracle tidak akan menimpa data ini.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleResetOverride()}
+                  loading={resetPOMutation.isPending}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Ikuti Oracle lagi
+                </Button>
+              </div>
+            )}
+          </section>
+
           <section className="surface-card p-5">
             <h3 className="section-title flex items-center gap-2">
               <FileText className="h-4 w-4 text-navy-400" />
@@ -676,6 +807,75 @@ export function PurchaseRequestDetailPage() {
           )}
         </aside>
       </div>
+
+      <Dialog open={poDialogOpen} onOpenChange={setPODialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Data PO (Manual)</DialogTitle>
+            <DialogDescription>
+              Perubahan manual akan ditandai sebagai sumber <strong>Manual</strong> dan tidak ditimpa
+              sinkronisasi Oracle sampai Anda melepas manual override.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="po-number">No PO</Label>
+              <Input
+                id="po-number"
+                value={poForm.po_number}
+                onChange={(event) => setPOForm((current) => ({ ...current, po_number: event.target.value }))}
+                placeholder="Contoh: POG/QI/1GQ01/2603061"
+                maxLength={80}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="po-date">Tanggal PO</Label>
+                <Input
+                  id="po-date"
+                  type="date"
+                  value={poForm.po_date}
+                  onChange={(event) => setPOForm((current) => ({ ...current, po_date: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="po-value">Harga</Label>
+                <Input
+                  id="po-value"
+                  inputMode="decimal"
+                  value={poForm.po_value}
+                  onChange={(event) => setPOForm((current) => ({ ...current, po_value: event.target.value }))}
+                  placeholder="Contoh: 1350000"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="po-delivery">Tanggal Estimasi Datang</Label>
+              <Input
+                id="po-delivery"
+                type="date"
+                value={poForm.delivery_estimate_date}
+                onChange={(event) =>
+                  setPOForm((current) => ({ ...current, delivery_estimate_date: event.target.value }))
+                }
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Status otomatis: No PO kosong → Pending PO, No PO terisi → PO Approve (kecuali status sudah final).
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPODialogOpen(false)}>
+              Batal
+            </Button>
+            <Button onClick={() => void handleSavePO()} loading={updatePOMutation.isPending}>
+              Simpan Data PO
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
         <DialogContent>

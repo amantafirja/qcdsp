@@ -45,6 +45,8 @@ type PurchaseRequestRepository interface {
 	FindByReference(ctx context.Context, reference string) (*models.PurchaseRequest, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status, notes string, actor PRActor) error
 	UpdateNotes(ctx context.Context, id uuid.UUID, notes string, actor PRActor) error
+	UpdatePOInfo(ctx context.Context, id uuid.UUID, info models.POManualInput, actor PRActor) error
+	ResetPOOverride(ctx context.Context, id uuid.UUID, actor PRActor) error
 	Merge(ctx context.Context, masterID uuid.UUID, memberIDs []uuid.UUID, actor PRActor) error
 	Unmerge(ctx context.Context, masterID uuid.UUID, memberIDs []uuid.UUID, actor PRActor) error
 	SoftDelete(ctx context.Context, id uuid.UUID, actor PRActor) error
@@ -67,6 +69,8 @@ func NewPurchaseRequestRepository(db *sql.DB) PurchaseRequestRepository {
 const prSelectColumns = `
 	p.id, p.reference_number, p.description, p.order_type, p.custom_order_type,
 	p.requester_name, p.reason, p.status, p.internal_notes,
+	p.po_number, p.po_date, p.po_value, p.delivery_estimate_date, p.oracle_synced_at,
+	p.po_list, p.po_source, p.po_manual_override, p.oracle_sync_status, p.oracle_last_sync_at,
 	p.master_pr_id, p.merged_at, p.deleted_at, p.created_at, p.updated_at,
 	(SELECT mp.reference_number FROM purchase_requests mp WHERE mp.id = p.master_pr_id) AS master_reference,
 	(SELECT COUNT(*) FROM purchase_requests c WHERE c.master_pr_id = p.id AND c.deleted_at IS NULL) AS member_count`
@@ -608,6 +612,125 @@ func (r *purchaseRequestRepository) UpdateNotes(ctx context.Context, id uuid.UUI
 	return tx.Commit()
 }
 
+func (r *purchaseRequestRepository) UpdatePOInfo(ctx context.Context, id uuid.UUID, info models.POManualInput, actor PRActor) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var (
+		oldPONumber  *string
+		oldPODate    *string
+		oldPOValue   *float64
+		oldDelivery  *string
+		currentStatus string
+	)
+	if err := tx.QueryRowContext(ctx, `
+		SELECT po_number, po_date::text, po_value, delivery_estimate_date::text, status
+		FROM purchase_requests
+		WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE`, id).Scan(&oldPONumber, &oldPODate, &oldPOValue, &oldDelivery, &currentStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	newStatus := currentStatus
+	if !models.IsTerminalStatus(currentStatus) {
+		if info.PONumber != nil && strings.TrimSpace(*info.PONumber) != "" {
+			newStatus = models.PRStatusPOApprove
+		} else {
+			newStatus = models.PRStatusPendingPO
+		}
+	}
+
+	syncStatus := models.OracleStatusBelumPO
+	if info.PONumber != nil && strings.TrimSpace(*info.PONumber) != "" {
+		syncStatus = models.OracleStatusSudahPO
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE purchase_requests
+		SET po_number = $2,
+		    po_date = $3::date,
+		    po_value = $4,
+		    delivery_estimate_date = $5::date,
+		    po_source = 'manual',
+		    po_manual_override = TRUE,
+		    oracle_sync_status = $6,
+		    status = $7,
+		    updated_at = NOW()
+		WHERE id = $1`,
+		id, info.PONumber, info.PODate, info.POValue, info.DeliveryEstimateDate, syncStatus, newStatus,
+	); err != nil {
+		return err
+	}
+
+	if newStatus != currentStatus {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO purchase_request_status_history (id, purchase_request_id, status, notes, changed_by)
+			VALUES ($1, $2, $3, $4, $5)`,
+			uuid.New(), id, newStatus, "Perubahan status otomatis dari edit data PO manual", actor.ID,
+		); err != nil {
+			return err
+		}
+	}
+
+	before := map[string]interface{}{
+		"po_number":              oldPONumber,
+		"po_date":                oldPODate,
+		"po_value":               oldPOValue,
+		"delivery_estimate_date": oldDelivery,
+		"status":                 currentStatus,
+	}
+	after := map[string]interface{}{
+		"po_number":              info.PONumber,
+		"po_date":                info.PODate,
+		"po_value":               info.POValue,
+		"delivery_estimate_date": info.DeliveryEstimateDate,
+		"status":                 newStatus,
+		"po_source":              "manual",
+	}
+	if err := insertAudit(ctx, tx, id, "po_manual_updated", actor, "Data PO diubah manual", before, after); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *purchaseRequestRepository) ResetPOOverride(ctx context.Context, id uuid.UUID, actor PRActor) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE purchase_requests
+		SET po_manual_override = FALSE, po_source = 'oracle', updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+
+	if err := insertAudit(ctx, tx, id, "po_override_reset", actor, "Manual override data PO dilepas",
+		map[string]interface{}{"po_manual_override": true},
+		map[string]interface{}{"po_manual_override": false}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (r *purchaseRequestRepository) Merge(ctx context.Context, masterID uuid.UUID, memberIDs []uuid.UUID, actor PRActor) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -997,14 +1120,25 @@ func scanPRRow(row rowScanner) (*models.PurchaseRequest, error) {
 	var masterID *uuid.UUID
 	var masterRef sql.NullString
 	var memberCount int
+	var poList []byte
+	var oracleSyncStatus sql.NullString
 	err := row.Scan(
 		&pr.ID, &pr.ReferenceNumber, &pr.Description, &pr.OrderType, &pr.CustomOrderType,
 		&pr.RequesterName, &pr.Reason, &pr.Status, &pr.InternalNotes,
+		&pr.PONumber, &pr.PODate, &pr.POValue, &pr.DeliveryEstimateDate, &pr.OracleSyncedAt,
+		&poList, &pr.POSource, &pr.POManualOverride, &oracleSyncStatus, &pr.OracleLastSyncAt,
 		&masterID, &pr.MergedAt, &pr.DeletedAt, &pr.CreatedAt, &pr.UpdatedAt,
 		&masterRef, &memberCount,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if len(poList) > 0 {
+		pr.POList = json.RawMessage(poList)
+	}
+	if oracleSyncStatus.Valid {
+		value := oracleSyncStatus.String
+		pr.OracleSyncStatus = &value
 	}
 	pr.StatusLabel = models.StatusLabel(pr.Status)
 	pr.IsMerged = masterID != nil

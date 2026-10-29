@@ -20,6 +20,7 @@ import { CategoryManagementPage } from '@/pages/admin/category-management-page'
 import { PurchaseRequestManagementPage } from '@/pages/admin/purchase-request-management-page'
 import { PurchaseRequestDetailPage } from '@/pages/admin/purchase-request-detail-page'
 import { AccountManagementPage } from '@/pages/admin/account-management-page'
+import { OracleSyncPage } from '@/pages/admin/oracle-sync-page'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -98,6 +99,14 @@ export default function App() {
               />
               <Route path="purchase-requests" element={<PurchaseRequestManagementPage />} />
               <Route path="purchase-requests/:id" element={<PurchaseRequestDetailPage />} />
+              <Route
+                path="oracle"
+                element={
+                  <RequireRole roles={['super_admin', 'admin']}>
+                    <OracleSyncPage />
+                  </RequireRole>
+                }
+              />
               <Route
                 path="accounts"
                 element={

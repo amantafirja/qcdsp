@@ -67,6 +67,8 @@ type PurchaseRequestService interface {
 	Get(ctx context.Context, id uuid.UUID) (*models.PurchaseRequest, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, input PRStatusInput, actor PRActorInput) (*models.PurchaseRequest, error)
 	UpdateNotes(ctx context.Context, id uuid.UUID, notes string, actor PRActorInput) (*models.PurchaseRequest, error)
+	UpdatePO(ctx context.Context, id uuid.UUID, input models.POManualInput, actor PRActorInput) (*models.PurchaseRequest, error)
+	ResetPOOverride(ctx context.Context, id uuid.UUID, actor PRActorInput) (*models.PurchaseRequest, error)
 	Merge(ctx context.Context, masterID uuid.UUID, input PRMergeInput, actor PRActorInput) (*models.PurchaseRequest, error)
 	Unmerge(ctx context.Context, masterID uuid.UUID, input PRMergeInput, actor PRActorInput) (*models.PurchaseRequest, error)
 	Delete(ctx context.Context, id uuid.UUID, actor PRActorInput) error
@@ -311,6 +313,46 @@ func (s *purchaseRequestService) UpdateStatus(ctx context.Context, id uuid.UUID,
 			return nil, ErrNotFound
 		case errors.Is(err, repository.ErrStatusFinal):
 			return nil, ValidationErrors{"status": "Status akhir tidak dapat diubah"}
+		}
+		return nil, err
+	}
+	return s.requests.FindByID(ctx, id)
+}
+
+func (s *purchaseRequestService) UpdatePO(ctx context.Context, id uuid.UUID, input models.POManualInput, actor PRActorInput) (*models.PurchaseRequest, error) {
+	validation := newValidation()
+
+	if input.PONumber != nil {
+		trimmed := strings.TrimSpace(*input.PONumber)
+		if len(trimmed) > 80 {
+			validation.add("po_number", "No PO maksimal 80 karakter")
+		}
+		if trimmed == "" {
+			input.PONumber = nil
+		} else {
+			input.PONumber = &trimmed
+		}
+	}
+	if input.POValue != nil && *input.POValue < 0 {
+		validation.add("po_value", "Harga tidak boleh negatif")
+	}
+	if validation.hasErrors() {
+		return nil, validation
+	}
+
+	if err := s.requests.UpdatePOInfo(ctx, id, input, toRepoActor(actor)); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return s.requests.FindByID(ctx, id)
+}
+
+func (s *purchaseRequestService) ResetPOOverride(ctx context.Context, id uuid.UUID, actor PRActorInput) (*models.PurchaseRequest, error) {
+	if err := s.requests.ResetPOOverride(ctx, id, toRepoActor(actor)); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}

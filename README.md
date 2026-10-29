@@ -33,6 +33,57 @@ Stack: **React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui** · **Go (Gin)
 - **Knowledge Management**: CRUD dokumen, upload PDF, upload gambar artikel, publish/unpublish.
 - **Category Management**: CRUD kategori dengan proteksi kategori yang masih dipakai.
 - **Purchase Request Management**: tabel PR dengan item, pencarian, filter status/jenis/rentang tanggal, detail PR, **ubah progress (hanya admin)**, catatan internal, **penggabungan PR (consolidation)**, **copy cepat**, **bulk copy**, **soft delete**, **audit trail**, unduh lampiran, dan **export Excel**. Untuk `pr_viewer` semua aksi ubah progress/catatan/penggabungan disembunyikan dan ditolak backend (403).
+- **Oracle Sync** (khusus `super_admin` / `admin`): upload hasil export Oracle (`.xls` / `.xlsx`), **Upload & Sync**, **Sync Ulang**, ringkasan hasil, riwayat upload, riwayat & log sinkronisasi, serta **download hasil sinkronisasi (CSV)**.
+
+### Integrasi Oracle (Purchase Management)
+
+Tujuan: mengurangi input manual data PO. Admin mengunggah file tarikan Oracle, sistem mencocokkan **No PR** dan memperbarui data purchasing pada PR yang sudah ada.
+
+**Data yang diisi otomatis:**
+
+| Field Purchase Management | Sumber kolom Oracle |
+|---------------------------|---------------------|
+| Tanggal PO | `Date` setelah kolom `PO No.` (`Date2` pada export .xlsx) |
+| No PO | `PO No.` |
+| Harga | `Total Value PO` (bukan `Unit Price`) |
+| Tanggal Estimasi Datang | `Delivery Date` |
+
+**Aturan pencocokan**
+
+- Kunci sinkronisasi hanya **No PR = PR No.** Tidak memakai nama barang, deskripsi, vendor, atau note.
+- Sebelum dicocokkan, nomor dinormalisasi: trim spasi, hapus tanda petik di awal (`'PRG/...`), hapus karakter tersembunyi (zero-width/BOM/`\u202d`), case-insensitive, dan hapus spasi di dalam nomor.
+- File Oracle **tidak membuat PR baru** dan **tidak menghapus PR** yang sudah ada. Nomor yang tidak ditemukan hanya dilaporkan.
+
+**Duplikat & multi PO**
+
+- Baris identik (`PR No.` + `PO No.` + `Line` + `Item` + `Qty` + `Total Value PO`) dianggap duplikat dan diproses satu kali; jumlahnya dilaporkan.
+- Satu PR dengan banyak line tetap menjadi satu baris PR (tidak duplikat).
+- Satu PR dengan banyak PO: semua PO disimpan di `po_list`; tampilan memakai `PO001 (+1 PO lainnya)` dengan popup detail.
+- Harga = total seluruh PO valid; Tanggal PO = tanggal paling awal; Tanggal Estimasi Datang = tanggal paling akhir.
+
+**Status Oracle Sync**
+
+| Status | Arti |
+|--------|------|
+| `belum_po` | No PO masih kosong |
+| `sudah_po` | No PO tersedia (termasuk data yang dilewati karena manual/final) |
+| `sync_berhasil` | Data berhasil diperbarui dari Oracle |
+| `tidak_ditemukan` | No PR web tidak ditemukan pada file Oracle |
+| `perlu_ditinjau` | Multi PO atau data tidak konsisten |
+
+Status workflow PR mengikuti aturan: **No PO kosong → Pending PO**, **No PO terisi → PO Approve** (status final tidak diubah).
+
+**Manual override**
+
+- Admin dapat mengedit Tanggal PO / No PO / Harga / Estimasi Datang lewat detail PR (tombol **Edit PO**). Data ditandai `po_source = manual` dan `po_manual_override = true`.
+- Sinkronisasi berikutnya **tidak menimpa** PR dengan manual override (dilaporkan sebagai `skipped_manual`).
+- Tombol **Ikuti Oracle lagi** melepas override sehingga PR kembali mengikuti data Oracle.
+
+**Sinkronisasi berulang (incremental)**
+
+- File dapat diunggah berkali-kali; dataset Oracle selalu diganti dengan upload terakhir (latest source of truth).
+- Setiap proses sync menyimpan `oracle_sync_logs` (file, aktor, jumlah data diproses/diperbarui/dilewati, waktu) dan dapat diunduh sebagai CSV.
+- Perubahan PO juga tercatat pada audit trail PR (`oracle_synced`, `po_manual_updated`, `po_override_reset`).
 
 ### Nomor PR
 
@@ -131,7 +182,9 @@ qcdsp/
 │   │   ├── 001_init.sql            # schema PostgreSQL
 │   │   ├── 002_admin_roles.sql     # role super_admin/admin/pr_viewer
 │   │   ├── 003_pr_workflow.sql     # item PR, counter nomor, merge, audit, soft delete, status baru
-│   │   └── 004_pr_item_order.sql   # urutan item PR
+│   │   ├── 004_pr_item_order.sql   # urutan item PR
+│   │   ├── 005_oracle_sync.sql     # kolom PO + tabel integrasi Oracle
+│   │   └── 006_oracle_sync_extended.sql  # multi PO, dedupe, status sync, log
 │   ├── uploads/                    # file upload (runtime)
 │   ├── .env.example
 │   ├── go.mod
@@ -352,7 +405,10 @@ Dump hanya berisi data; file PDF/lampiran berada di `backend/uploads`. Jika fold
 | `admin_users` | Admin panel (username unik, password bcrypt, role, audit fields) |
 | `categories` | Kategori Knowledge Center (nama & slug unik) |
 | `knowledge_documents` | Dokumen PDF/artikel, `search_vector` GIN index, publish flag, view count |
-| `purchase_requests` | PR publik: nomor unik, status workflow, `master_pr_id` (penggabungan), `deleted_at` (soft delete) |
+| `purchase_requests` | PR publik: nomor unik, status workflow, `master_pr_id` (penggabungan), data PO (`po_number`, `po_date`, `po_value`, `delivery_estimate_date`, `po_list`, `po_source`, `po_manual_override`), `deleted_at` (soft delete) |
+| `oracle_imports` | Riwayat upload file Oracle (file, aktor, jumlah baris/PR, statistik duplikat & multi PO, waktu sync) |
+| `oracle_purchase_orders` | Dataset Oracle terakhir, satu baris per PR (hasil agregasi & dedupe, `po_list` JSONB, status sync) |
+| `oracle_sync_logs` | Log setiap proses sinkronisasi (jumlah diproses/diperbarui/dilewati, hasil per PR JSONB) |
 | `purchase_request_items` | Item PR (banyak item per PR) dengan urutan dan asal PR |
 | `pr_number_counters` | Counter nomor PR per periode `MMYY` (atomik, tanpa pemakaian ulang) |
 | `purchase_request_audit_logs` | Audit trail (aksi, aktor, role, data sebelum/sesudah JSONB) |
@@ -475,11 +531,21 @@ Contoh nilai `items`:
 | GET | `/admin/purchase-requests/:id` | Detail PR + riwayat (semua role) |
 | PUT | `/admin/purchase-requests/:id/status` | Ubah progress + catatan (`super_admin`, `admin`) |
 | PUT | `/admin/purchase-requests/:id` | Simpan catatan internal (`super_admin`, `admin`) |
+| PUT | `/admin/purchase-requests/:id/po` | Edit data PO manual (`super_admin`, `admin`) |
+| POST | `/admin/purchase-requests/:id/po/reset` | Lepas manual override, kembali mengikuti Oracle (`super_admin`, `admin`) |
 | POST | `/admin/purchase-requests/:id/merge` | Gabungkan PR anggota ke PR `:id` sebagai PR Utama (`super_admin`, `admin`) |
 | POST | `/admin/purchase-requests/:id/unmerge` | Batalkan penggabungan; `member_ids` kosong = semua anggota (`super_admin`, `admin`) |
 | DELETE | `/admin/purchase-requests/:id` | Soft delete PR (`super_admin`, `admin`) |
 | GET | `/admin/purchase-requests/:id/audit` | Audit trail PR (`super_admin`, `admin`) |
 | GET | `/admin/purchase-requests/:id/attachments/:attachmentId` | Unduh lampiran (semua role) |
+| GET | `/admin/oracle` | Status dataset Oracle + daftar baris + riwayat upload & sync (`super_admin`, `admin`) |
+| POST | `/admin/oracle/upload` | Upload file Oracle saja (multipart `file`, `.xls`/`.xlsx`, maks. 25 MB) |
+| POST | `/admin/oracle/upload-sync` | Upload lalu langsung sinkronisasi |
+| POST | `/admin/oracle/sync` | Sync ulang dataset terakhir (query `trigger` opsional) |
+| GET | `/admin/oracle/logs` | Riwayat sinkronisasi |
+| GET | `/admin/oracle/logs/:id` | Detail log (termasuk hasil per PR) |
+| GET | `/admin/oracle/logs/:id/download` | Unduh hasil sinkronisasi (CSV) |
+| DELETE | `/admin/oracle` | Hapus dataset Oracle terakhir (PR tidak dihapus) |
 
 Semua endpoint `/admin/*` (kecuali login) memerlukan header:
 
@@ -519,6 +585,19 @@ curl -X POST http://localhost:8080/api/admin/purchase-requests/<master-id>/merge
 
 # Audit trail
 curl http://localhost:8080/api/admin/purchase-requests/<id>/audit \
+  -H "Authorization: Bearer <token>"
+
+# Upload file Oracle lalu langsung sinkronisasi
+curl -X POST http://localhost:8080/api/admin/oracle/upload-sync \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@XXB7_PO_Purchase_Monitoring.xls"
+
+# Sync ulang dataset Oracle terakhir
+curl -X POST http://localhost:8080/api/admin/oracle/sync \
+  -H "Authorization: Bearer <token>"
+
+# Unduh hasil sinkronisasi (CSV)
+curl -o hasil-sync.csv http://localhost:8080/api/admin/oracle/logs/<log-id>/download \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -659,6 +738,11 @@ Catatan produksi:
 | Tracking PR tidak ditemukan padahal nomor benar | Nomor berformat `PRG/1GQ01/MMYY/XXXXX`; UI memakai `GET /purchase-requests/track?reference=...` (jangan menaruh nomor di path karena mengandung `/`) |
 | Progress PR tidak bisa diubah | Status sudah final (`done`/`rejected`/`cancelled`) atau akun bukan `super_admin`/`admin` |
 | PR tidak bisa digabungkan | PR sudah menjadi anggota PR lain, sudah menjadi PR Utama, berstatus final, atau dihapus (soft delete) |
+| Upload Oracle gagal "file bukan Excel" | Pastikan file `.xls` adalah export Oracle (BI Publisher) atau `.xlsx`; file `.xls` biner lama tidak didukung |
+| Upload Oracle gagal tanpa respon (HTTP 000) | File sedang dibuka/dikunci aplikasi lain (mis. Excel). Tutup file atau unggah salinannya |
+| Banyak PR "Tidak Ditemukan" | Normal bila file Oracle berisi ribuan PR lama; hanya PR yang ada di web yang diperbarui |
+| Data PO tidak berubah setelah sync | Cek manual override aktif (badge "Sumber: Manual"); klik **Ikuti Oracle lagi** lalu sync ulang |
+| Nomor PR Oracle tidak cocok | Sistem menormalisasi spasi, tanda petik awal, karakter tersembunyi, dan case; pastikan kolom `PR No.` benar |
 | Nomor PR "loncat" | Normal: nomor PR yang dihapus/ditolak/dibatalkan tidak pernah dipakai ulang |
 | `npm install` lambat/ECONNRESET | Gunakan `--registry=https://registry.npmmirror.com` |
 | `Failed to resolve entry for package ...` / modul tidak ditemukan | `node_modules` ter-ekstrak tidak lengkap (install terputus). Stop dev server, hapus `node_modules` + `node_modules/.vite`, lalu `npm ci` |

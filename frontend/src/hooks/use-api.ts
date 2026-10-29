@@ -14,6 +14,9 @@ import type {
   AdminUser,
   AdminAccountInput,
   PRAuditLog,
+  OracleStatus,
+  OracleSyncResult,
+  OracleSyncLog,
 } from '@/types'
 
 export const queryKeys = {
@@ -28,6 +31,7 @@ export const queryKeys = {
   profile: ['admin-profile'] as const,
   adminAccounts: ['admin-accounts'] as const,
   prAudit: (id?: string) => ['pr-audit', id] as const,
+  oracle: ['oracle-status'] as const,
 }
 
 export function useCategories(scope: 'public' | 'admin' = 'public') {
@@ -400,6 +404,114 @@ export function usePRAudit(id?: string, enabled = true) {
       return response.data ?? []
     },
     enabled: Boolean(id) && enabled,
+  })
+}
+
+export function useOracleStatus() {
+  return useQuery({
+    queryKey: queryKeys.oracle,
+    queryFn: async () => {
+      const response = await apiGet<OracleStatus>('/admin/oracle')
+      return response.data as OracleStatus
+    },
+  })
+}
+
+export function useUploadOracle() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ file, sync }: { file: File; sync: boolean }) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      const endpoint = sync ? '/admin/oracle/upload-sync' : '/admin/oracle/upload'
+      if (sync) {
+        const response = await apiPost<OracleSyncResult>(endpoint, formData)
+        return response.data as OracleSyncResult
+      }
+      const response = await apiPost<OracleStatus>(endpoint, formData)
+      return response.data as OracleStatus
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.oracle })
+      queryClient.invalidateQueries({ queryKey: ['purchase-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+export function useSyncOracle() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiPost<OracleSyncResult>('/admin/oracle/sync')
+      return response.data as OracleSyncResult
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.oracle })
+      queryClient.invalidateQueries({ queryKey: ['purchase-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+export function useClearOracle() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      await apiDelete('/admin/oracle')
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.oracle })
+    },
+  })
+}
+
+export function useOracleSyncLogs(limit = 20) {
+  return useQuery({
+    queryKey: ['oracle-logs', limit],
+    queryFn: async () => {
+      const response = await apiGet<OracleSyncLog[]>(`/admin/oracle/logs?limit=${limit}`)
+      return response.data ?? []
+    },
+  })
+}
+
+export function useUpdatePurchaseRequestPO() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...payload
+    }: {
+      id: string
+      po_number?: string | null
+      po_date?: string | null
+      po_value?: number | null
+      delivery_estimate_date?: string | null
+    }) => {
+      const response = await apiPut<PurchaseRequest>(`/admin/purchase-requests/${id}/po`, payload)
+      return response.data as PurchaseRequest
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['purchase-request'] })
+      queryClient.invalidateQueries({ queryKey: ['pr-audit'] })
+    },
+  })
+}
+
+export function useResetPurchaseRequestPO() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiPost<PurchaseRequest>(`/admin/purchase-requests/${id}/po/reset`)
+      return response.data as PurchaseRequest
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['purchase-request'] })
+      queryClient.invalidateQueries({ queryKey: ['pr-audit'] })
+    },
   })
 }
 

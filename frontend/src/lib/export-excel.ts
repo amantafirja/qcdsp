@@ -28,6 +28,10 @@ export function exportPurchaseRequestsToExcel(requests: PurchaseRequest[], filen
     'Total Qty',
     'Alasan',
     'Status',
+    'Tanggal PO',
+    'No PO',
+    'Harga',
+    'Tanggal Estimasi Datang',
     'PR Utama',
     'PR Asal (Gabungan)',
     'Catatan Internal',
@@ -67,6 +71,10 @@ export function exportPurchaseRequestsToExcel(requests: PurchaseRequest[], filen
         cell(totalQuantity, 'Number'),
         cell(pr.reason),
         cell(statusLabel(pr.status)),
+        cell(pr.po_date ? pr.po_date.slice(0, 10) : ''),
+        cell(pr.po_number ?? ''),
+        cell(pr.po_value ?? ''),
+        cell(pr.delivery_estimate_date ? pr.delivery_estimate_date.slice(0, 10) : ''),
         cell(pr.master?.reference_number ?? ''),
         cell(pr.members.map((member) => member.reference_number).join(' | ')),
         cell(pr.internal_notes ?? ''),
@@ -109,6 +117,10 @@ export function exportPurchaseRequestsToExcel(requests: PurchaseRequest[], filen
       <Column ss:Width="70"/>
       <Column ss:Width="220"/>
       <Column ss:Width="120"/>
+      <Column ss:Width="110"/>
+      <Column ss:Width="170"/>
+      <Column ss:Width="90"/>
+      <Column ss:Width="140"/>
       <Column ss:Width="160"/>
       <Column ss:Width="200"/>
       <Column ss:Width="200"/>
